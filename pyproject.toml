@@ -1,0 +1,44 @@
+[project]
+name = "pinpoint-eval"
+version = "0.1.0"
+description = "Pinpoint: a contamination-aware visual geolocation benchmark for Vision-Language Models"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "inspect-ai>=0.3.50",
+    "openai>=1.50.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "jinja2>=3.1.4",
+    "python-multipart>=0.0.12",
+    "pillow>=11.0.0",
+    "geographiclib>=2.0",
+    "pycountry>=24.6.1",
+    "python-dotenv>=1.0.1",
+    "httpx>=0.27.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "ruff>=0.7.0",
+]
+
+[project.scripts]
+pinpoint = "pinpoint.cli:main"
+
+[build-system]
+requires = ["setuptools>=69.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

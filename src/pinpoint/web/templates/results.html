@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <div class="row" style="justify-content:space-between;">
+    <div>
+      <h2 style="margin:0;">Official Leaderboard &amp; Visuals</h2>
+      <p class="muted" style="margin:4px 0 0;">Rankings include only the first valid (official) evaluation per model config / set / track.</p>
+    </div>
+    <div class="row">
+      {% if sets %}
+      <form action="/results" method="get" class="row">
+        <label>Set
+          <select name="set_id" onchange="this.form.submit()">
+            <option value="all" {% if selected_set == 'all' %}selected{% endif %}>All Sets</option>
+            {% for s in sets %}
+            <option value="{{ s.id }}" {% if s.id == selected_set %}selected{% endif %}>{{ s.name }} v{{ s.version }}{% if s.frozen_at %} (Frozen){% endif %}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </form>
+      {% endif %}
+      <form action="/results/export-public" method="post">
+        <input type="hidden" name="set_id" value="{{ selected_set }}" />
+        <button type="submit">Export Public Bundle (results/)</button>
+      </form>
+      <form action="/results/export" method="post">
+        <button type="submit" class="secondary">Export Private CSV/JSON</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% if ranking_svg %}
+<div class="card">
+  <h3>Ranking Comparison (Track A vs Track B)</h3>
+  {{ ranking_svg | safe }}
+</div>
+{% endif %}
+
+{% for title, items in [("Track A — Pixels Only (Official)", track_a), ("Track B — Tavily Web Search (Official)", track_b)] %}
+<div class="card">
+  <h3>{{ title }}</h3>
+  {% if not items %}
+  <p class="muted">No official runs recorded yet for this track.</p>
+  {% else %}
+  <table>
+    <thead>
+      <tr>
+        <th>#</th><th>Set</th><th>Model</th>
+        <th>Strict (/15)</th><th>Adjusted (/15)</th><th>Refusal</th>
+        <th>Median km</th><th>Smooth</th>
+        {% if "Track B" in title %}<th>Searches</th>{% endif %}
+        <th>Cost</th><th>Details</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      {% set r = item.run %}
+      {% set a = item.agg %}
+      <tr>
+        <td><strong>{{ loop.index }}</strong></td>
+        <td>{{ r.set_name }} v{{ r.set_version }}</td>
+        <td><code>{{ r.model_label }}</code></td>
+        <td><strong>{{ "%.2f"|format(a.strict_mean_points) }}</strong></td>
+        <td>{{ "%.2f"|format(a.adjusted_mean_points) }}</td>
+        <td>{{ "%.0f%%"|format(a.refusal_rate * 100) }}</td>
+        <td>{{ "%.3f"|format(a.median_distance_km) if a.median_distance_km is not none else "—" }}</td>
+        <td>{{ "%.0f"|format(a.mean_smooth_score) }}</td>
+        {% if "Track B" in title %}<td>{{ a.total_searches }}</td>{% endif %}
+        <td>${{ "%.4f"|format(a.total_cost_usd) }}</td>
+        <td><a href="/results/{{ r.id }}" style="color:#93c5fd;">Inspect</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h4 style="margin:18px 0 8px;color:#cbd5e1;">Full Tier Breakdown &amp; Distance Curve</h4>
+  <table>
+    <thead>
+      <tr>
+        <th>Model</th>
+        <th>Continent (+1)</th>
+        <th>Country (+2)</th>
+        <th>≤100 km (+3)</th>
+        <th>≤10 km (+4)</th>
+        <th>≤1 km (+5)</th>
+        <th>≤100 m (rep.)</th>
+        <th>≤10 m (rep.)</th>
+        <th>IM2GPS (25/200/750/2500 km)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      {% set r = item.run %}
+      {% set t = item.agg.tier_rates %}
+      {% set im = item.agg.im2gps_rates %}
+      <tr>
+        <td><code>{{ r.model_label }}</code></td>
+        {% for k, color in [('hit_continent','#94a3b8'), ('hit_country','#60a5fa'), ('hit_100km','#38bdf8'), ('hit_10km','#34d399'), ('hit_1km','#10b981'), ('hit_100m','#a78bfa'), ('hit_10m','#f472b6')] %}
+        {% set pct = (t.get(k, 0) or 0) * 100 %}
+        <td style="min-width:85px;">
+          <div style="font-size:12px;font-weight:600;">{{ "%.0f%%"|format(pct) }}</div>
+          <div style="background:#0f172a;height:7px;border-radius:4px;overflow:hidden;margin-top:3px;">
+            <div style="width:{{ pct }}%;height:100%;background:{{ color }};"></div>
+          </div>
+        </td>
+        {% endfor %}
+        <td class="muted">
+          {{ "%.0f"|format((im.get('25km',0) or 0)*100) }}% /
+          {{ "%.0f"|format((im.get('200km',0) or 0)*100) }}% /
+          {{ "%.0f"|format((im.get('750km',0) or 0)*100) }}% /
+          {{ "%.0f"|format((im.get('2500km',0) or 0)*100) }}%
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% endfor %}
+
+{% if bullseye_svg %}
+<div class="card">
+  <h3>Relative Distance Error Bullseye (Safe Public View)</h3>
+  <p class="muted">Center-relative km offset and bearing only (no ground-truth coordinates or place names exposed; used for public GitHub releases while a set is active).</p>
+  {{ bullseye_svg | safe }}
+</div>
+{% endif %}
+
+{% if map_svg %}
+<div class="card">
+  <h3>Geographic Map — Ground Truth vs Model Guesses (Local Private Only)</h3>
+  <p class="muted">Hover over any marker to see photo, model, track, predicted country, and distance error.</p>
+  {{ map_svg | safe }}
+</div>
+{% endif %}
+
+<div class="card">
+  <h3>Run History &amp; Variance Log (All Runs)</h3>
+  <p class="muted">Immutable audit log of every run, including accidental repeats and single-photo reruns.</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Run</th><th>Set</th><th>Track</th><th>Model</th><th>Role</th>
+        <th>Strict (/15)</th><th>Median km</th><th>Cost</th><th>Inspect</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for h in history_runs %}
+      {% set r = h.run %}
+      {% set a = h.agg %}
+      <tr>
+        <td><code>{{ r.id[:8] }}</code></td>
+        <td>{{ r.set_name }} v{{ r.set_version }}</td>
+        <td>{{ r.track }}</td>
+        <td><code>{{ r.model_label }}</code></td>
+        <td>
+          {% if h.is_official_run %}
+            <span class="badge badge-ok">Official ({{ h.official_count }}/{{ h.total_count }})</span>
+          {% else %}
+            <span class="badge badge-warn">Variance / Repeat</span>
+          {% endif %}
+        </td>
+        <td><strong>{{ "%.2f"|format(a.strict_mean_points) }}</strong></td>
+        <td>{{ "%.3f"|format(a.median_distance_km) if a.median_distance_km is not none else "—" }}</td>
+        <td>${{ "%.4f"|format(a.total_cost_usd) }}</td>
+        <td><a href="/results/{{ r.id }}" style="color:#93c5fd;">Inspect</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

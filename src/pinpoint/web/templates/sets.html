@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>Create Image Set</h2>
+  <form action="/sets/create" method="post" class="row">
+    <input type="text" name="name" placeholder="europe" required />
+    <input type="number" name="version" value="1" min="1" style="width:70px;" />
+    <input type="text" name="description" placeholder="Description (optional)" style="width:280px;" />
+    <button type="submit">Create Set</button>
+  </form>
+  {% if country_counts %}
+  <div class="row" style="margin-top:10px;">
+    <span class="badge {% if country_counts|length > 10 %}badge-ok{% else %}badge-blue{% endif %}">Pool: {{ pool_photos|length }} photos · {{ country_counts|length }} countries</span>
+    {% for cc in country_counts %}
+    <span class="badge badge-muted">{{ cc.country_iso2 }}: {{ cc.cnt }}</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Image Sets</h2>
+  <table>
+    <thead>
+      <tr><th>Set</th><th>Photos</th><th>Status</th><th>Commitment Hash</th><th>Action</th></tr>
+    </thead>
+    <tbody>
+      {% for s in sets %}
+      <tr>
+        <td><strong>{{ s.name }} v{{ s.version }}</strong><div class="muted">{{ s.description or "" }}</div></td>
+        <td>{{ s.member_count }}</td>
+        <td>{% if s.frozen_at %}Frozen{% else %}Mutable{% endif %}</td>
+        <td><code>{{ s.commitment_hash[:16] ~ "..." if s.commitment_hash else "—" }}</code></td>
+        <td>
+          {% if not s.frozen_at and s.member_count > 0 %}
+          <form action="/sets/freeze" method="post">
+            <input type="hidden" name="set_id" value="{{ s.id }}" />
+            <button type="submit">Freeze &amp; Hash</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if sets and pool_photos %}
+<div class="card">
+  <h2>Add Pool Photos to a Set</h2>
+  <form action="/sets/add-photos" method="post">
+    <div class="row">
+      <label>Target Set:
+        <select name="set_id">
+          {% for s in sets if not s.frozen_at %}
+          <option value="{{ s.id }}">{{ s.name }} v{{ s.version }} ({{ s.member_count }} photos)</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit">Add Selected Photos</button>
+    </div>
+    <table>
+      <thead><tr><th>Pick</th><th>Photo</th><th>Country</th><th>Scene</th><th>Label</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for p in pool_photos %}
+        <tr>
+          <td><input type="checkbox" name="photo_ids" value="{{ p.id }}" /></td>
+          <td><img src="/media/sanitized/{{ p.id }}" style="height:48px;border-radius:4px;" /> <code>{{ p.id[:8] }}</code></td>
+          <td>{{ p.country_iso2 }} ({{ p.continent }})</td>
+          <td>{{ p.scene_tag }}</td>
+          <td>{{ p.place_label or "" }}</td>
+          <td>{{ p.status }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

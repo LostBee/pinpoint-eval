@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Pinpoint (pinpoint-eval)</title>
+  {% block head %}{% endblock %}
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }
+    nav { background: #1e293b; padding: 12px 24px; display: flex; gap: 20px; align-items: center; border-bottom: 1px solid #334155; }
+    nav a { color: #93c5fd; text-decoration: none; font-weight: 600; }
+    nav a:hover { text-decoration: underline; }
+    .brand { font-weight: 800; color: #f8fafc; margin-right: 16px; }
+    main { max-width: 1240px; margin: 24px auto; padding: 0 20px; }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    .flash { padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; }
+    .flash.ok { background: #064e3b; border: 1px solid #10b981; }
+    .flash.err { background: #7f1d1d; border: 1px solid #ef4444; }
+    .flash.warn { background: #78350f; border: 1px solid #f59e0b; }
+    .flash.info { background: #1e3a8a; border: 1px solid #3b82f6; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #334155; vertical-align: top; }
+    th { color: #94a3b8; font-weight: 600; }
+    input, select, button { font: inherit; padding: 6px 10px; border-radius: 5px; border: 1px solid #475569; background: #0f172a; color: #f8fafc; }
+    button { background: #2563eb; border-color: #3b82f6; cursor: pointer; font-weight: 600; }
+    button.secondary { background: #334155; border-color: #475569; }
+    button.danger { background: #b91c1c; border-color: #dc2626; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; }
+    img.thumb { max-width: 100%; max-height: 220px; border-radius: 6px; display: block; margin-bottom: 10px; object-fit: cover; }
+    code { background: #0f172a; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+    .muted { color: #94a3b8; font-size: 13px; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+    .badge-ok { background: #064e3b; color: #6ee7b7; border: 1px solid #10b981; }
+    .badge-blue { background: #1e3a8a; color: #93c5fd; border: 1px solid #3b82f6; }
+    .badge-warn { background: #78350f; color: #fcd34d; border: 1px solid #f59e0b; }
+    .badge-err { background: #7f1d1d; color: #fca5a5; border: 1px solid #ef4444; }
+    .badge-muted { background: #334155; color: #cbd5e1; border: 1px solid #475569; }
+  </style>
+</head>
+<body>
+  <nav>
+    <span class="brand">Pinpoint</span>
+    <a href="/">Inbox</a>
+    <a href="/pool">Pool</a>
+    <a href="/sets">Sets</a>
+    <a href="/runs">Runs &amp; Queue</a>
+    <a href="/results">Results &amp; History</a>
+  </nav>
+  <main>
+    {% if msg %}<div class="flash ok">{{ msg }}</div>{% endif %}
+    {% if err %}<div class="flash err">{{ err }}</div>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

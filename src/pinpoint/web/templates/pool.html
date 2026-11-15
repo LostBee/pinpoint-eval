@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <div class="row" style="justify-content:space-between;">
+    <h2>Photo Pool ({{ photos|length }})</h2>
+    <form action="/pool" method="get" class="row">
+      <label>Filter country:
+        <select name="country" onchange="this.form.submit()">
+          <option value="">All ({{ countries|length }})</option>
+          {% for c in countries %}
+          <option value="{{ c }}" {% if c == selected_country %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </form>
+  </div>
+  <p class="muted">Photos in an unfrozen set or still in the pool can be edited inline. Frozen sets lock ground truth.</p>
+  {% if country_counts %}
+  <div class="row" style="margin-top:8px;">
+    <span class="badge {% if countries|length > 10 %}badge-ok{% else %}badge-blue{% endif %}">{{ countries|length }} countries</span>
+    {% for cc in country_counts %}
+    <span class="badge badge-muted">{{ cc.country_iso2 }}: {{ cc.cnt }}</span>
+    {% endfor %}
+  </div>
+  <div class="row" style="margin-top:6px;">
+    {% for sc in scene_counts %}
+    <span class="badge badge-blue">{{ sc.scene_tag }}: {{ sc.cnt }}</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<datalist id="eu-countries">
+  {% for iso, cname in country_choices %}
+  <option value="{{ iso }}">{{ cname }}</option>
+  {% endfor %}
+</datalist>
+
+<div class="card">
+  <table>
+    <thead>
+      <tr><th>Photo</th><th>Coordinates &amp; OSM</th><th>Country / Scene / Label</th><th>Flags</th><th>Action</th></tr>
+    </thead>
+    <tbody>
+      {% for p in photos %}
+      <tr>
+        <td>
+          <img src="/media/sanitized/{{ p.id }}" style="height:64px;border-radius:4px;" />
+          <div><code>{{ p.id[:8] }}</code></div>
+          <div class="muted">{{ p.camera_model or "" }}</div>
+        </td>
+        {% if p.is_frozen %}
+        <td>
+          {{ "%.5f"|format(p.lat) }}, {{ "%.5f"|format(p.lon) }}
+          <div><a href="https://www.openstreetmap.org/?mlat={{ p.lat }}&mlon={{ p.lon }}#map=16/{{ p.lat }}/{{ p.lon }}" target="_blank" style="color:#93c5fd;">Open in OSM</a></div>
+        </td>
+        <td><strong>{{ p.country_iso2 }}</strong> ({{ p.continent }}) · {{ p.scene_tag }}<div class="muted">{{ p.place_label or "" }}</div></td>
+        <td>
+          {% if p.near_border %}<span class="badge badge-warn">near_border</span>{% endif %}
+          {% if p.has_text %}<span class="badge badge-blue">has_text</span>{% endif %}
+          {% if p.has_landmark %}<span class="badge badge-ok">landmark</span>{% endif %}
+        </td>
+        <td><span class="badge badge-muted">Locked (frozen set)</span></td>
+        {% else %}
+        <form action="/pool/update" method="post">
+          <input type="hidden" name="photo_id" value="{{ p.id }}" />
+          <td>
+            <input type="number" step="any" name="lat" value="{{ p.lat }}" style="width:95px;" required />
+            <input type="number" step="any" name="lon" value="{{ p.lon }}" style="width:95px;" required />
+            <div><a href="https://www.openstreetmap.org/?mlat={{ p.lat }}&mlon={{ p.lon }}#map=16/{{ p.lat }}/{{ p.lon }}" target="_blank" style="color:#93c5fd;">Open in OSM</a></div>
+          </td>
+          <td>
+            <div class="row">
+              <input type="text" name="country" list="eu-countries" value="{{ p.country_iso2 }}" style="width:65px;" required />
+              <select name="scene_tag">
+                {% for st in ['urban', 'rural', 'nature', 'landmark', 'indoor_context', 'no_clue'] %}
+                <option value="{{ st }}" {% if p.scene_tag == st %}selected{% endif %}>{{ st }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <input type="text" name="place_label" value="{{ p.place_label or '' }}" placeholder="Label" style="width:170px;" />
+          </td>
+          <td>
+            <label><input type="checkbox" name="near_border" {% if p.near_border %}checked{% endif %} /> near_border</label><br/>
+            <label><input type="checkbox" name="has_text" {% if p.has_text %}checked{% endif %} /> has_text</label><br/>
+            <label><input type="checkbox" name="has_landmark" {% if p.has_landmark %}checked{% endif %} /> landmark</label>
+          </td>
+          <td><button type="submit" class="secondary">Save</button></td>
+        </form>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

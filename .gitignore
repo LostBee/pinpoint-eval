@@ -1,0 +1,26 @@
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Sensitive benchmark data (photos, ground truth, Inspect logs)
+data/
+vault/
+images/
+inbox/
+logs/
+exports/
+*.sqlite
+*.sqlite3
+*.db
+*.eval
+
+# Python / tooling
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/

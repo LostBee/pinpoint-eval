@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>Run <code>{{ run.id[:8] }}</code> · {{ run.set_name }} v{{ run.set_version }} · Track {{ run.track }}</h2>
+  <p class="muted">Model: <code>{{ run.model_label }}</code> · Status: {{ run.status }} · Log: <code>{{ run.inspect_log_path }}</code></p>
+</div>
+
+{% if map_svg %}
+<div class="card">
+  <h3>Run Map — Truth vs Guesses</h3>
+  {{ map_svg | safe }}
+</div>
+{% endif %}
+
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th>Photo</th><th>Truth</th><th>Guess</th><th>Status</th>
+        <th>Dist km</th><th>Pts (/15)</th><th>≤100m / ≤10m</th><th>Usage</th><th>Official</th><th>Rerun</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>
+          <img src="/media/sanitized/{{ row.photo_id }}" style="height:56px;border-radius:4px;" />
+          <div><code>{{ row.photo_id[:8] }}</code></div>
+        </td>
+        <td>
+          <strong>{{ row.gt_country }}</strong>
+          <a href="https://www.openstreetmap.org/?mlat={{ row.gt_lat }}&mlon={{ row.gt_lon }}#map=16/{{ row.gt_lat }}/{{ row.gt_lon }}" target="_blank" style="color:#93c5fd;">OSM</a>
+          <div class="muted">{{ "%.4f"|format(row.gt_lat) }}, {{ "%.4f"|format(row.gt_lon) }} · {{ row.place_label or "" }}</div>
+        </td>
+        <td>
+          <strong>{{ row.pred_country_iso2 or "—" }}</strong>
+          {% if row.pred_lat is not none %}
+            <a href="https://www.openstreetmap.org/?mlat={{ row.pred_lat }}&mlon={{ row.pred_lon }}#map=16/{{ row.pred_lat }}/{{ row.pred_lon }}" target="_blank" style="color:#93c5fd;">OSM</a>
+            <div class="muted">{{ "%.4f"|format(row.pred_lat) }}, {{ "%.4f"|format(row.pred_lon) }}</div>
+          {% endif %}
+          <div class="muted">{{ row.reasoning_text or "" }}</div>
+        </td>
+        <td>{{ row.parse_status }}</td>
+        <td>
+          {% if row.distance_km is not none %}
+            {% if row.distance_km <= 1.0 %}<span class="badge badge-ok">{{ "%.2f"|format(row.distance_km) }}</span>
+            {% elif row.distance_km <= 10.0 %}<span class="badge badge-blue">{{ "%.2f"|format(row.distance_km) }}</span>
+            {% elif row.distance_km <= 100.0 %}<span class="badge badge-warn">{{ "%.2f"|format(row.distance_km) }}</span>
+            {% else %}<span class="badge badge-err">{{ "%.2f"|format(row.distance_km) }}</span>
+            {% endif %}
+          {% else %}—{% endif %}
+        </td>
+        <td><strong>{{ row.tier_points }}</strong></td>
+        <td>{{ "✓" if row.hit_100m else "·" }} / {{ "✓" if row.hit_10m else "·" }}</td>
+        <td class="muted">{{ row.tokens_in }}/{{ row.tokens_out }} tok<br/>{{ "%.1f"|format((row.latency_ms or 0) / 1000) }}s · ${{ "%.4f"|format(row.cost_usd or 0) }}</td>
+        <td>{{ "Official" if row.is_official else "Variance" }}</td>
+        <td>
+          <form action="/runs/rerun-photo" method="post">
+            <input type="hidden" name="set_id" value="{{ run.set_id }}" />
+            <input type="hidden" name="track" value="{{ run.track }}" />
+            <input type="hidden" name="model_config_id" value="{{ run.model_config_id }}" />
+            <input type="hidden" name="photo_id" value="{{ row.photo_id }}" />
+            <button type="submit" class="secondary">Rerun</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

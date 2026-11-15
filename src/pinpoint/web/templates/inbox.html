@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>Inbox Review ({{ items|length }} pending · {{ pool_count }} ingested)</h2>
+  <p class="muted">Drop Pixel photos into <code>{{ inbox_dir }}</code> or upload below. Only outdoor scenes without people, plates, private homes, or previously posted photos.</p>
+  <form action="/inbox/upload" method="post" enctype="multipart/form-data" class="row">
+    <input type="file" name="files" multiple accept=".jpg,.jpeg,.png,.webp" required />
+    <button type="submit">Upload to Inbox</button>
+  </form>
+</div>
+
+<datalist id="eu-countries">
+  {% for iso, cname in country_choices %}
+  <option value="{{ iso }}">{{ cname }}</option>
+  {% endfor %}
+</datalist>
+
+{% if not items %}
+  <div class="card"><p class="muted">Inbox is empty.</p></div>
+{% else %}
+<div class="grid">
+  {% for item in items %}
+  <div class="card">
+    <img class="thumb" src="/media/inbox/{{ item.filename }}" alt="{{ item.filename }}" />
+    <div><strong>{{ item.filename }}</strong></div>
+    <div class="muted">
+      {{ item.meta.camera_model or "Unknown camera" }} · {{ item.meta.taken_date or "No EXIF date" }}
+      {% if item.meta.lat is not none and item.meta.lon is not none %}
+        · <a href="https://www.openstreetmap.org/?mlat={{ item.meta.lat }}&mlon={{ item.meta.lon }}#map=16/{{ item.meta.lat }}/{{ item.meta.lon }}" target="_blank" style="color:#93c5fd;">Open in OSM</a>
+      {% endif %}
+    </div>
+    <form action="/inbox/ingest" method="post" style="margin-top:10px;">
+      <input type="hidden" name="filename" value="{{ item.filename }}" />
+      <div class="row">
+        <label>Lat <input type="number" step="any" name="lat" value="{{ item.meta.lat or '' }}" required style="width:110px;" /></label>
+        <label>Lon <input type="number" step="any" name="lon" value="{{ item.meta.lon or '' }}" required style="width:110px;" /></label>
+      </div>
+      <div class="row">
+        <label>Country <input type="text" name="country" list="eu-countries" placeholder="LU, IT, DE..." required style="width:120px;" /></label>
+        <label>Label <input type="text" name="place_label" placeholder="City / area" style="width:150px;" /></label>
+      </div>
+      <div class="row">
+        <select name="scene_tag">
+          <option value="urban">urban</option>
+          <option value="rural">rural</option>
+          <option value="nature">nature</option>
+          <option value="landmark">landmark</option>
+          <option value="indoor_context">indoor_context</option>
+          <option value="no_clue">no_clue</option>
+        </select>
+        <label><input type="checkbox" name="near_border" /> near_border</label>
+        <label><input type="checkbox" name="has_text" /> has_text</label>
+        <label><input type="checkbox" name="has_landmark" /> landmark</label>
+      </div>
+      <div class="row">
+        <button type="submit">Sanitize &amp; Add to Pool</button>
+      </div>
+    </form>
+    <form action="/inbox/exclude" method="post">
+      <input type="hidden" name="filename" value="{{ item.filename }}" />
+      <button type="submit" class="secondary">Exclude</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

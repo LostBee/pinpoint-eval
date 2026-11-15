@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block head %}
+  {% if has_active_jobs %}
+  <meta http-equiv="refresh" content="3" />
+  {% endif %}
+{% endblock %}
+{% block content %}
+{% if has_active_jobs %}
+<div class="flash info row" style="justify-content:space-between;">
+  <span>Worker active — auto-refreshing every 3 seconds...</span>
+  <a href="/runs" style="color:#f8fafc;font-weight:600;">Refresh now</a>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Launch Sequential Run</h2>
+  <form action="/runs" method="get" class="row">
+    <label>Set
+      <select name="set_id" onchange="this.form.submit()">
+        {% for s in sets %}
+        <option value="{{ s.id }}" {% if s.id == selected_set %}selected{% endif %}>{{ s.name }} v{{ s.version }} ({{ s.member_count }})</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Track
+      <select name="track" onchange="this.form.submit()">
+        <option value="A" {% if selected_track == 'A' %}selected{% endif %}>Track A (Pixels Only)</option>
+        <option value="B" {% if selected_track == 'B' %}selected{% endif %}>Track B (Tavily Web Search)</option>
+      </select>
+    </label>
+    <label>Model
+      <select name="model_id" onchange="this.form.submit()">
+        {% for m in models %}
+        <option value="{{ m.id }}" {% if m.id == selected_model %}selected{% endif %}>{{ m.vendor }} · {{ m.openrouter_id }}{% if m.reasoning_effort %} [{{ m.reasoning_effort }}]{% endif %}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </form>
+
+  {% if estimate %}
+  <p class="muted">
+    Estimated cost ({{ estimate.n_photos }} photos, Track {{ selected_track }}):
+    <strong>${{ estimate.estimated_total_usd }}</strong>
+    (model ${{ estimate.estimated_model_usd }} + search ${{ estimate.estimated_search_usd }})
+  </p>
+  {% endif %}
+
+  {% if guard and guard.blocked %}
+  <div class="flash warn">{{ guard.message }}</div>
+  {% endif %}
+
+  {% if selected_set and selected_model %}
+  <form action="/runs/enqueue" method="post" class="row">
+    <input type="hidden" name="set_id" value="{{ selected_set }}" />
+    <input type="hidden" name="track" value="{{ selected_track }}" />
+    <input type="hidden" name="model_config_id" value="{{ selected_model }}" />
+    {% if guard and guard.blocked %}
+    <input type="text" name="override_reason" placeholder="Override reason required" required style="width:280px;" />
+    {% endif %}
+    <button type="submit">Queue Sequential Run (1 photo at a time)</button>
+  </form>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="row" style="justify-content:space-between;">
+    <h2>Job Queue</h2>
+    <a href="/runs" style="color:#93c5fd;">Refresh</a>
+  </div>
+  <table>
+    <thead><tr><th>Job</th><th>Type</th><th>Model / Track</th><th>State</th><th>Progress</th><th>Error</th><th>Action</th></tr></thead>
+    <tbody>
+      {% for j in jobs %}
+      <tr>
+        <td><code>{{ j.id[:8] }}</code></td>
+        <td>{{ j.job_type }}</td>
+        <td>
+          <strong>{{ j.payload.model_config_id }}</strong> · Track {{ j.payload.track }}
+          {% if j.payload.photo_id %}<div class="muted">Photo <code>{{ j.payload.photo_id[:8] }}</code></div>{% endif %}
+        </td>
+        <td>
+          {% if j.state == 'done' %}<span class="badge badge-ok">done</span>
+          {% elif j.state == 'running' %}<span class="badge badge-blue">running</span>
+          {% elif j.state == 'pending' %}<span class="badge badge-warn">pending</span>
+          {% elif j.state == 'failed' %}<span class="badge badge-err">failed</span>
+          {% else %}<span class="badge badge-muted">{{ j.state }}</span>
+          {% endif %}
+        </td>
+        <td>{{ j.progress_text or "—" }}</td>
+        <td class="muted" style="max-width:340px;">{{ j.error or "" }}</td>
+        <td>
+          {% if j.state == 'pending' %}
+          <form action="/jobs/cancel" method="post">
+            <input type="hidden" name="job_id" value="{{ j.id }}" />
+            <button type="submit" class="danger">Cancel</button>
+          </form>
+          {% elif j.state == 'failed' %}
+          <form action="/jobs/retry" method="post">
+            <input type="hidden" name="job_id" value="{{ j.id }}" />
+            <button type="submit" class="secondary">Retry</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Model Configs (OpenRouter IDs &amp; Reasoning Effort)</h2>
+  <p class="muted">Follows OpenRouter <code>reasoning.effort</code> nomenclature (<code>none</code>, <code>minimal</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, <code>max</code>). To sweep thinking levels on the same model, add one config per effort level.</p>
+  <table>
+    <thead><tr><th>ID</th><th>Vendor</th><th>Tier</th><th>OpenRouter Model ID</th><th>Reasoning Effort</th><th>Save</th></tr></thead>
+    <tbody>
+      {% for m in models %}
+      <tr>
+        <td><code>{{ m.id }}</code></td>
+        <td>{{ m.vendor }}</td>
+        <td>{{ m.tier }}</td>
+        <form action="/models/update" method="post">
+          <td>
+            <input type="hidden" name="model_id" value="{{ m.id }}" />
+            <input type="text" name="openrouter_id" value="{{ m.openrouter_id }}" style="width:310px;" />
+          </td>
+          <td>
+            <select name="reasoning_effort">
+              <option value="" {% if not m.reasoning_effort %}selected{% endif %}>(default)</option>
+              {% for eff in reasoning_efforts %}
+              <option value="{{ eff }}" {% if m.reasoning_effort == eff %}selected{% endif %}>{{ eff }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td><button type="submit" class="secondary">Update</button></td>
+        </form>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <form action="/models/add" method="post" class="row" style="margin-top:12px;">
+    <input type="text" name="model_id" placeholder="id (e.g. google-fast-high)" required style="width:165px;" />
+    <input type="text" name="vendor" placeholder="vendor (google)" required style="width:110px;" />
+    <input type="text" name="family" placeholder="family (gemini)" required style="width:110px;" />
+    <select name="tier">
+      <option value="fast">fast</option>
+      <option value="mid">mid</option>
+      <option value="frontier">frontier</option>
+    </select>
+    <input type="text" name="openrouter_id" placeholder="openrouter/vendor/model-slug" required style="width:260px;" />
+    <select name="reasoning_effort">
+      <option value="">(default)</option>
+      {% for eff in reasoning_efforts %}
+      <option value="{{ eff }}" {% if eff == 'minimal' %}selected{% endif %}>{{ eff }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit">Add Model</button>
+  </form>
+</div>
+{% endblock %}
