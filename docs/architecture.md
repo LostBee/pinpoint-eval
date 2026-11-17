@@ -28,9 +28,10 @@ flowchart LR
 2. **Pre-Run Commitments (`src/pinpoint/sets.py`):**
    - Freezing a set computes `SHA-256(salt | JSON({id, sha256_sanitized, lat, lon, country_iso2, continent}))`.
    - `results/<set>/commitment.json` publishes the commitment hash before evaluation while keeping `commitment_salt` private.
-3. **Vendor Rotation Guard (`src/pinpoint/sets.py`):**
-   - Prevents testing a second distinct `openrouter_id` from the same AI company on an already-tested set without an explicit override reason.
-   - Sweeping OpenRouter `reasoning.effort` values (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`) across configs sharing the same `openrouter_id` is allowed on the same set.
+3. **Set Retirement & Rotation Guard (`src/pinpoint/sets.py`):**
+   - While an image set is active (`expires_at IS NULL`), any number of existing models and `reasoning.effort` configurations (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`) from the same vendor can be evaluated side-by-side without blocking.
+   - Each model configuration (`model_config_id`) is locked against in-place edits once it has recorded runs, ensuring new runs never overwrite or relabel earlier results from the same vendor.
+   - When future model generations are released (whose training data could post-date API evaluation of the active set), marking the set **Retired** (`expires_at` set via `/sets/retire`) blocks new model configurations until a refreshed set (`v2`) is created.
 4. **Active-Set Public Redaction (`Option 1`, `src/pinpoint/charts.py` & `src/pinpoint/runner.py`):**
    - Public exports write only aggregate `summary.json`, `ranking_chart.svg`, `commitment.json`, `README.md`, and an origin-centered `bullseye_error.svg` (`0 km` center, km offset + bearing only—no absolute coordinates, countries, or photo IDs).
 

@@ -83,9 +83,10 @@ Publish the commitment hash *before* running models so nobody can claim photo se
 
 1. On `/runs` under **Model Configs (OpenRouter IDs & Reasoning Effort)**:
    - Verify starter `minimal` configs (`anthropic-fast`, `openai-fast`, `google-fast`, `xai-fast`) use the exact OpenRouter model slugs you want.
-2. Add configs for each thinking level you plan to sweep using **Add Model**, matching OpenRouter's `reasoning.effort` values (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`):
-   - Example IDs: `google-fast-none`, `google-fast-low`, `google-fast-high` pointing to the same `openrouter/google/...` slug with their respective `Reasoning Effort` selected.
-   - Pinpoint's vendor rotation guard permits reasoning-effort sweeps across the **same** `openrouter_id` on `europe v1`, while still blocking a *second distinct model* from the same AI company unless you refresh the photo set (or supply an explicit override).
+2. Add a distinct config row for each model and thinking level you want to evaluate using **Add Model**, matching OpenRouter's `reasoning.effort` values (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`):
+   - Example IDs: `openai-terra-pro-medium`, `openai-terra-medium`, `google-flash-low`, `google-flash-high`.
+   - You can freely run multiple existing models and thinking levels from the same AI company on `europe v1`—each `model_config_id` gets its own separate `Official` leaderboard entry and is locked against in-place edits once evaluated so previous results are never overwritten.
+   - Later in the future, when AI companies release a new generation of models (whose training cutoff could post-date `europe v1`), click **Retire Set** on `/sets` and create `europe v2`.
 3. *(Optional)* Smoke-test one photo via single-photo rerun or confirm cost estimates on a fresh config before queuing all `200` photos across multiple effort levels.
 
 ---
@@ -120,3 +121,4 @@ Publish the commitment hash *before* running models so nobody can claim photo se
 | Date | Update |
 |---|---|
 | 2026-11-16 | Initial Phase 1 runbook (`200` photos, `> 10` countries, OpenRouter `reasoning.effort` sweeps, Option-1 public exports). |
+| 2026-11-17 | Clarified rotation policy: multiple existing models & thinking levels per vendor allowed on active sets (`europe v1`) without overwriting prior results; retire set & rotate to `v2` only for future model releases. Added latency/token/OpenRouter cost telemetry. |

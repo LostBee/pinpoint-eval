@@ -50,7 +50,7 @@
         <th>Strict (/15)</th><th>Adjusted (/15)</th><th>Refusal</th>
         <th>Median km</th><th>Smooth</th>
         {% if "Track B" in title %}<th>Searches</th>{% endif %}
-        <th>Cost</th><th>Details</th>
+        <th>Total Time</th><th>Mean Latency</th><th>Cost</th><th>Details</th>
       </tr>
     </thead>
     <tbody>
@@ -67,8 +67,42 @@
         <td>{{ "%.3f"|format(a.median_distance_km) if a.median_distance_km is not none else "—" }}</td>
         <td>{{ "%.0f"|format(a.mean_smooth_score) }}</td>
         {% if "Track B" in title %}<td>{{ a.total_searches }}</td>{% endif %}
+        <td>{% if (a.total_time_s or 0) >= 60 %}{{ "%.1f min"|format(a.total_time_s / 60) }}{% else %}{{ "%.1f s"|format(a.total_time_s or 0) }}{% endif %}</td>
+        <td>{{ "%.2f s"|format(a.mean_latency_s or 0) }}</td>
         <td>${{ "%.4f"|format(a.total_cost_usd) }}</td>
         <td><a href="/results/{{ r.id }}" style="color:#93c5fd;">Inspect</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h4 style="margin:18px 0 8px;color:#cbd5e1;">Speed, Latency &amp; Token Telemetry</h4>
+  <table>
+    <thead>
+      <tr>
+        <th>Model</th>
+        <th>Total Time</th>
+        <th>Mean Latency</th>
+        <th>Median Latency</th>
+        <th>Prompt Tok (avg / cached)</th>
+        <th>Output Tok (avg)</th>
+        <th>Reasoning Tok (avg / max)</th>
+        <th>Total Cost ($ / photo)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      {% set r = item.run %}
+      {% set a = item.agg %}
+      <tr>
+        <td><code>{{ r.model_label }}</code></td>
+        <td>{% if (a.total_time_s or 0) >= 60 %}{{ "%.1f min"|format(a.total_time_s / 60) }}{% else %}{{ "%.1f s"|format(a.total_time_s or 0) }}{% endif %}</td>
+        <td>{{ "%.2f s"|format(a.mean_latency_s or 0) }}</td>
+        <td>{{ "%.2f s"|format(a.median_latency_s or 0) }}</td>
+        <td>{{ a.mean_tokens_in or 0 }} <span class="muted">({{ a.mean_tokens_cached or 0 }} cached)</span></td>
+        <td>{{ a.mean_tokens_out or 0 }}</td>
+        <td><strong>{{ a.mean_tokens_reasoning or 0 }}</strong> <span class="muted">(max {{ a.max_tokens_reasoning or 0 }})</span></td>
+        <td><strong>${{ "%.4f"|format(a.total_cost_usd) }}</strong> <span class="muted">(${{ "%.5f"|format(a.cost_per_photo_usd or 0) }}/img)</span></td>
       </tr>
       {% endfor %}
     </tbody>
@@ -142,7 +176,7 @@
     <thead>
       <tr>
         <th>Run</th><th>Set</th><th>Track</th><th>Model</th><th>Role</th>
-        <th>Strict (/15)</th><th>Median km</th><th>Cost</th><th>Inspect</th>
+        <th>Strict (/15)</th><th>Median km</th><th>Total Time</th><th>Mean Lat</th><th>Reasoning Tok</th><th>Cost</th><th>Inspect</th>
       </tr>
     </thead>
     <tbody>
@@ -163,6 +197,9 @@
         </td>
         <td><strong>{{ "%.2f"|format(a.strict_mean_points) }}</strong></td>
         <td>{{ "%.3f"|format(a.median_distance_km) if a.median_distance_km is not none else "—" }}</td>
+        <td>{% if (a.total_time_s or 0) >= 60 %}{{ "%.1f min"|format(a.total_time_s / 60) }}{% else %}{{ "%.1f s"|format(a.total_time_s or 0) }}{% endif %}</td>
+        <td>{{ "%.2f s"|format(a.mean_latency_s or 0) }}</td>
+        <td>{{ a.mean_tokens_reasoning or 0 }} avg</td>
         <td>${{ "%.4f"|format(a.total_cost_usd) }}</td>
         <td><a href="/results/{{ r.id }}" style="color:#93c5fd;">Inspect</a></td>
       </tr>

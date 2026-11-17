@@ -409,7 +409,9 @@ def export_summary_files(conn: sqlite3.Connection, cfg: PinpointConfig) -> tuple
                res.pred_country_iso2, res.pred_lat, res.pred_lon, res.pred_confidence,
                res.distance_km, res.tier_points, res.smooth_score,
                res.hit_continent, res.hit_country, res.hit_100km, res.hit_10km, res.hit_1km,
-               res.hit_100m, res.hit_10m, res.tool_calls_count, res.cost_usd
+               res.hit_100m, res.hit_10m, res.tool_calls_count,
+               res.tokens_in, res.tokens_out, res.tokens_reasoning, res.tokens_cached,
+               res.latency_ms, res.cost_usd
         FROM results res
         JOIN runs r ON r.id = res.run_id
         JOIN model_configs mc ON mc.id = r.model_config_id
@@ -574,18 +576,20 @@ def export_public_release(
             md_lines.extend(["_No official runs recorded yet._", ""])
             continue
         md_lines.extend([
-            "| # | Model (Reasoning Effort) | Strict (/15) | Adjusted (/15) | Median km | Country % | ≤10 km % | ≤1 km % | Cost |",
-            "|---:|---|---:|---:|---:|---:|---:|---:|---:|",
+            "| # | Model (Reasoning Effort) | Strict (/15) | Adjusted (/15) | Median km | Country % | ≤10 km % | ≤1 km % | Total Time | Mean Latency | Reasoning Tok | Cost |",
+            "|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
         ])
         for i, item in enumerate(items, 1):
             r, a = item["run"], item["agg"]
             lbl = format_model_label(r["openrouter_id"], r.get("reasoning_effort"))
             med = f"{a['median_distance_km']:.3f}" if a["median_distance_km"] is not None else "—"
+            t_sec = float(a.get("total_time_s") or 0.0)
+            t_lbl = f"{t_sec / 60:.1f}m" if t_sec >= 60 else f"{t_sec:.0f}s"
             tr = a["tier_rates"]
             md_lines.append(
                 f"| {i} | `{lbl}` | **{a['strict_mean_points']:.2f}** | {a['adjusted_mean_points']:.2f} | "
                 f"{med} | {tr.get('hit_country', 0)*100:.0f}% | {tr.get('hit_10km', 0)*100:.0f}% | "
-                f"{tr.get('hit_1km', 0)*100:.0f}% | ${a['total_cost_usd']:.4f} |"
+                f"{tr.get('hit_1km', 0)*100:.0f}% | {t_lbl} | {a['mean_latency_s']:.2f}s | {a['mean_tokens_reasoning']} | ${a['total_cost_usd']:.4f} |"
             )
         md_lines.append("")
 

@@ -378,6 +378,18 @@ def aggregate_run_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "tier_rates": {},
             "im2gps_rates": {},
             "total_cost_usd": 0.0,
+            "cost_per_photo_usd": 0.0,
+            "total_time_s": 0.0,
+            "mean_latency_s": 0.0,
+            "median_latency_s": 0.0,
+            "mean_tokens_in": 0,
+            "mean_tokens_cached": 0,
+            "mean_tokens_out": 0,
+            "mean_tokens_reasoning": 0,
+            "max_tokens_reasoning": 0,
+            "total_tokens_in": 0,
+            "total_tokens_out": 0,
+            "total_tokens_reasoning": 0,
         }
 
     answered = [r for r in rows if r["parse_status"] == "ok"]
@@ -398,6 +410,14 @@ def aggregate_run_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         for km in (25, 200, 750, 2500)
     }
 
+    latencies_s = [float(r.get("latency_ms") or 0) / 1000.0 for r in rows]
+    tot_in = sum(int(r.get("tokens_in") or 0) for r in rows)
+    tot_cached = sum(int(r.get("tokens_cached") or 0) for r in rows)
+    tot_out = sum(int(r.get("tokens_out") or 0) for r in rows)
+    reasoning_vals = [int(r.get("tokens_reasoning") or 0) for r in rows]
+    tot_reasoning = sum(reasoning_vals)
+    tot_cost = sum(float(r.get("cost_usd") or 0.0) for r in rows)
+
     return {
         "count": n,
         "answered_count": len(answered),
@@ -410,5 +430,17 @@ def aggregate_run_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "median_distance_km": round(median_km, 3) if median_km is not None else None,
         "tier_rates": tier_rates,
         "im2gps_rates": im2gps_rates,
-        "total_cost_usd": round(sum(float(r.get("cost_usd") or 0.0) for r in rows), 6),
+        "total_cost_usd": round(tot_cost, 6),
+        "cost_per_photo_usd": round(tot_cost / n, 6),
+        "total_time_s": round(sum(latencies_s), 1),
+        "mean_latency_s": round(statistics.mean(latencies_s), 2),
+        "median_latency_s": round(statistics.median(latencies_s), 2),
+        "mean_tokens_in": round(tot_in / n),
+        "mean_tokens_cached": round(tot_cached / n),
+        "mean_tokens_out": round(tot_out / n),
+        "mean_tokens_reasoning": round(tot_reasoning / n),
+        "max_tokens_reasoning": max(reasoning_vals),
+        "total_tokens_in": tot_in,
+        "total_tokens_out": tot_out,
+        "total_tokens_reasoning": tot_reasoning,
     }

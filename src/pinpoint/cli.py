@@ -9,6 +9,7 @@ import uvicorn
 
 from pinpoint.config import get_config
 from pinpoint.db import connect_db, init_db
+from pinpoint.importer import backfill_runs_from_eval_logs
 from pinpoint.ingest import verify_sanitized_image
 from pinpoint.runner import export_public_release, export_summary_files
 
@@ -31,6 +32,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Export leak-free Option-1 results bundle (commitment, summary, bullseye) to results/",
     )
     pub_p.add_argument("--set-id", default=None, help="Optional image_set UUID (defaults to latest frozen set)")
+    sub.add_parser("backfill-logs", help="Re-import existing .eval logs to update tokens, reasoning, latency, and cost")
 
     args = parser.parse_args(argv)
     cfg = get_config()
@@ -59,6 +61,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "export-public":
         out_dir = export_public_release(conn, cfg, set_id=args.set_id)
         print(f"Exported safe public bundle to:\n  {out_dir}")
+        conn.close()
+        return 0
+
+    if args.command == "backfill-logs":
+        n = backfill_runs_from_eval_logs(conn)
+        print(f"Backfilled {n} run(s) from .eval logs.")
         conn.close()
         return 0
 

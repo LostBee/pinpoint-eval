@@ -53,7 +53,7 @@
         </td>
         <td><strong>{{ row.tier_points }}</strong></td>
         <td>{{ "✓" if row.hit_100m else "·" }} / {{ "✓" if row.hit_10m else "·" }}</td>
-        <td class="muted">{{ row.tokens_in }}/{{ row.tokens_out }} tok<br/>{{ "%.1f"|format((row.latency_ms or 0) / 1000) }}s · ${{ "%.4f"|format(row.cost_usd or 0) }}</td>
+        <td class="muted">{{ row.tokens_in }}/{{ row.tokens_out }} tok{% if row.tokens_reasoning %} ({{ row.tokens_reasoning }} reas){% endif %}<br/>{{ "%.1f"|format((row.latency_ms or 0) / 1000) }}s · ${{ "%.4f"|format(row.cost_usd or 0) }}</td>
         <td>{{ "Official" if row.is_official else "Variance" }}</td>
         <td>
           <form action="/runs/rerun-photo" method="post">

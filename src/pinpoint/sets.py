@@ -123,16 +123,35 @@ def freeze_set(conn: sqlite3.Connection, set_id: str) -> str:
     return commit_hash
 
 
+def retire_set(conn: sqlite3.Connection, set_id: str) -> str:
+    """Mark a frozen image set as retired so future model releases require a new set version."""
+    row = conn.execute(
+        "SELECT frozen_at, expires_at FROM image_sets WHERE id = ?", (set_id,)
+    ).fetchone()
+    if not row:
+        raise ValueError(f"Unknown set_id: {set_id}")
+    if row["frozen_at"] is None:
+        freeze_set(conn, set_id)
+    if row["expires_at"] is not None:
+        return str(row["expires_at"])
+    now = utc_now()
+    conn.execute("UPDATE image_sets SET expires_at = ? WHERE id = ?", (now, set_id))
+    conn.commit()
+    return now
+
+
 def check_vendor_rotation_guard(
     conn: sqlite3.Connection,
     set_id: str,
     model_config_id: str,
 ) -> dict[str, str | bool | None]:
-    """Check Requirement 3: warn/block testing a 2nd distinct model from the same vendor on the same set.
+    """Check Requirement 3: block new model evaluations only after a set is retired for future releases.
 
-    Sweeping reasoning_effort levels on the same OpenRouter model slug is permitted;
-    testing a different model slug from the same vendor requires a refreshed image set
-    (or an explicit override reason).
+    While an image set is active (`expires_at IS NULL`), any number of existing models and
+    reasoning_effort levels from the same vendor may be evaluated without blocking, each
+    recorded under its own `model_config_id` so previous results are never overwritten.
+    Once a set is retired (`expires_at IS NOT NULL`), newly added models require a refreshed
+    photo set (or an explicit override reason).
     """
     target = conn.execute(
         "SELECT vendor, openrouter_id FROM model_configs WHERE id = ?",
@@ -141,38 +160,31 @@ def check_vendor_rotation_guard(
     if not target:
         raise ValueError(f"Unknown model_config_id: {model_config_id}")
 
-    target_slug = str(target["openrouter_id"]).removeprefix("openrouter/").strip()
-    prior_rows = conn.execute(
-        """
-        SELECT r.id AS run_id, r.model_config_id, mc.openrouter_id
-        FROM runs r
-        JOIN model_configs mc ON mc.id = r.model_config_id
-        WHERE r.set_id = ?
-          AND mc.vendor = ?
-          AND r.model_config_id != ?
-          AND r.status IN ('running', 'completed')
-        """,
-        (set_id, target["vendor"], model_config_id),
-    ).fetchall()
+    set_row = conn.execute(
+        "SELECT name, version, expires_at FROM image_sets WHERE id = ?", (set_id,)
+    ).fetchone()
+    if not set_row:
+        raise ValueError(f"Unknown set_id: {set_id}")
 
-    prior = next(
-        (
-            row
-            for row in prior_rows
-            if str(row["openrouter_id"]).removeprefix("openrouter/").strip() != target_slug
-        ),
-        None,
-    )
+    if set_row["expires_at"] is not None:
+        already_tested = conn.execute(
+            """
+            SELECT 1 FROM runs
+            WHERE set_id = ? AND model_config_id = ? AND status IN ('running', 'completed')
+            LIMIT 1
+            """,
+            (set_id, model_config_id),
+        ).fetchone()
+        if not already_tested:
+            return {
+                "blocked": True,
+                "vendor": target["vendor"],
+                "prior_model_id": None,
+                "message": (
+                    f"Set '{set_row['name']} v{set_row['version']}' is retired (`expires_at` set). "
+                    f"Create a new photo set before testing newly released models from '{target['vendor']}' "
+                    f"(or provide an explicit override reason)."
+                ),
+            }
 
-    if prior:
-        return {
-            "blocked": True,
-            "vendor": target["vendor"],
-            "prior_model_id": prior["model_config_id"],
-            "message": (
-                f"Vendor '{target['vendor']}' already tested on this set with "
-                f"'{prior['model_config_id']}' ({prior['openrouter_id']}). Refresh the photo set before testing a 2nd model "
-                f"from the same company (or provide an explicit override reason)."
-            ),
-        }
     return {"blocked": False, "vendor": target["vendor"], "prior_model_id": None, "message": None}

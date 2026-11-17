@@ -8,7 +8,7 @@ Public geolocation datasets quickly leak into pre-training corpora or web search
 
 - **Zero-Metadata Sanitization:** Originals stay in a private `vault/`. Photos sent to models are decoded, orientation-baked, resized (`<= 1536 px` long edge), and re-encoded as clean baseline sRGB JPEGs with opaque UUID filenames (`<uuid>.jpg`)—stripping all EXIF, GPS tags, XMP, ICC profiles, HDR gain maps, and Motion Photo MP4 trailers.
 - **Pre-Run Cryptographic Commitment:** Freezing an image set (`europe v1`) computes a salted `SHA-256` hash over ordered ground truth + sanitized image hashes before any model runs, proving photo lists were not cherry-picked after evaluation.
-- **Rotation Guard:** Enforces dataset rotation before testing a second distinct model from the same AI vendor on a frozen set (while allowing thinking-effort sweeps on the same model slug).
+- **Rotation Guard (Future Model Releases):** Multiple existing models and `reasoning.effort` configurations from the same AI company can be evaluated side-by-side on an active set (each under its own locked `model_config_id` so previous results are never overwritten). When a vendor later releases a newer generation of models whose training cutoff could post-date the evaluation, the set is marked **Retired** on `/sets` and rotated to a new version (`v2`).
 - **Safe Public Release Policy:** While a benchmark set is active, `pinpoint export-public` publishes `commitment.json` (hash only, salt withheld), `summary.json`, `ranking_chart.svg`, and a center-relative `bullseye_error.svg` (`0 km` origin) so exact photo coordinates cannot be trilaterated from public artifacts or crawled by Track B web search.
 
 ## Two Evaluation Tracks

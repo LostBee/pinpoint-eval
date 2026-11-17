@@ -216,3 +216,63 @@ def test_web_ui_routes_smoke(tmp_path: Path):
         assert conn2.execute("SELECT 1 FROM model_configs WHERE id = 'xai-fast'").fetchone() is None
         conn2.close()
         assert client.get("/results").status_code == 200
+
+
+def test_openrouter_cost_and_telemetry_extraction():
+    from types import SimpleNamespace
+
+    from pinpoint.geo import aggregate_run_metrics
+    from pinpoint.importer import _extract_tokens_and_cost
+
+    sample = SimpleNamespace(
+        model_usage={
+            "openrouter/openai/gpt-6.1-terra-pro": SimpleNamespace(
+                input_tokens=3748,
+                input_tokens_cache_read=1766,
+                output_tokens=476,
+                reasoning_tokens=305,
+                total_cost=0.002826,
+            )
+        },
+        events=[
+            SimpleNamespace(
+                event="model",
+                call=SimpleNamespace(response={"usage": {"cost": 0.0062163}}),
+            )
+        ],
+    )
+    t_in, t_out, t_reas, t_cache, cost = _extract_tokens_and_cost(sample, "{}", 0, "A")
+    assert t_in == 5514
+    assert t_cache == 1766
+    assert t_out == 476
+    assert t_reas == 305
+    assert cost == 0.006216
+
+    agg = aggregate_run_metrics(
+        [
+            {
+                "parse_status": "ok",
+                "tier_points": 15,
+                "smooth_score": 5000.0,
+                "distance_km": 0.2,
+                "hit_continent": 1,
+                "hit_country": 1,
+                "hit_100km": 1,
+                "hit_10km": 1,
+                "hit_1km": 1,
+                "hit_100m": 0,
+                "hit_10m": 0,
+                "tokens_in": t_in,
+                "tokens_cached": t_cache,
+                "tokens_out": t_out,
+                "tokens_reasoning": t_reas,
+                "latency_ms": 9844,
+                "cost_usd": cost,
+            }
+        ]
+    )
+    assert agg["total_time_s"] == 9.8
+    assert agg["mean_latency_s"] == 9.84
+    assert agg["mean_tokens_reasoning"] == 305
+    assert agg["mean_tokens_in"] == 5514
+    assert agg["total_cost_usd"] == 0.006216

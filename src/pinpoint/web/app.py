@@ -46,6 +46,7 @@ from pinpoint.sets import (
     check_vendor_rotation_guard,
     create_image_set,
     freeze_set,
+    retire_set,
 )
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -377,6 +378,20 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
         finally:
             conn.close()
 
+    @app.post("/sets/retire")
+    def sets_retire(set_id: str = Form(...)):
+        conn = _db()
+        try:
+            retire_set(conn, set_id)
+            return RedirectResponse(
+                url="/sets?msg=Set+marked+retired+(future+model+releases+require+a+new+set)",
+                status_code=303,
+            )
+        except (ValueError, RuntimeError, sqlite3.Error) as exc:
+            return RedirectResponse(url=f"/sets?err={str(exc).replace(' ', '+')}", status_code=303)
+        finally:
+            conn.close()
+
     @app.get("/runs", response_class=HTMLResponse)
     def runs_page(request: Request, msg: str = "", err: str = "", set_id: str = "", model_id: str = "", track: str = "A"):
         conn = _db()
@@ -415,9 +430,21 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
             selected_model = model_id or (models[0]["id"] if models else "")
             guard = None
             estimate = None
+            already_run_on_track = False
             if selected_set and selected_model:
                 guard = check_vendor_rotation_guard(conn, selected_set, selected_model)
                 estimate = estimate_run_cost(conn, selected_set, selected_model, track)
+                already_run_on_track = (
+                    conn.execute(
+                        """
+                        SELECT 1 FROM runs
+                        WHERE set_id = ? AND track = ? AND model_config_id = ? AND status = 'completed'
+                        LIMIT 1
+                        """,
+                        (selected_set, track.upper(), selected_model),
+                    ).fetchone()
+                    is not None
+                )
         finally:
             conn.close()
         return templates.TemplateResponse(
@@ -433,6 +460,7 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
                 "selected_model": selected_model,
                 "selected_track": track,
                 "guard": guard,
+                "already_run_on_track": already_run_on_track,
                 "estimate": estimate,
                 "msg": msg,
                 "err": err,
@@ -480,6 +508,14 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
     ):
         conn = _db()
         try:
+            run_cnt = conn.execute(
+                "SELECT COUNT(*) AS c FROM runs WHERE model_config_id = ?", (model_id,)
+            ).fetchone()["c"]
+            if run_cnt > 0:
+                return RedirectResponse(
+                    url=f"/runs?err=Cannot+modify+{model_id}+in+place+({run_cnt}+recorded+run(s));+use+Add+Model+below+so+previous+results+are+not+overwritten",
+                    status_code=303,
+                )
             effort = normalize_reasoning_effort(reasoning_effort)
             conn.execute(
                 "UPDATE model_configs SET openrouter_id = ?, reasoning_effort = ? WHERE id = ?",

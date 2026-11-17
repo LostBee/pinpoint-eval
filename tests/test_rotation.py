@@ -8,13 +8,14 @@ from PIL import Image
 from pinpoint.config import PinpointConfig, normalize_reasoning_effort
 from pinpoint.db import connect_db, init_db, utc_now
 from pinpoint.ingest import ingest_photo
-from pinpoint.runner import ensure_inspect_model_cost, normalize_openrouter_id
+from pinpoint.runner import enqueue_run_job, ensure_inspect_model_cost, normalize_openrouter_id
 from pinpoint.sets import (
     add_photos_to_set,
     check_vendor_rotation_guard,
     compute_commitment_hash,
     create_image_set,
     freeze_set,
+    retire_set,
 )
 
 
@@ -54,7 +55,7 @@ def test_freeze_commitment_and_rotation_guard(tmp_path: Path):
     )
     conn.commit()
 
-    # Same model slug at different reasoning_effort: allowed for thinking sweeps
+    # Same model slug at different reasoning_effort: allowed on active set
     conn.execute(
         """
         INSERT INTO model_configs (id, vendor, family, tier, openrouter_id, reasoning_effort)
@@ -66,12 +67,36 @@ def test_freeze_commitment_and_rotation_guard(tmp_path: Path):
 
     # Same model rerun: allowed
     assert check_vendor_rotation_guard(conn, set_id, "google-fast")["blocked"] is False
-    # Different model, same vendor: blocked
-    guard = check_vendor_rotation_guard(conn, set_id, "google-fast-2")
-    assert guard["blocked"] is True
-    assert guard["vendor"] == "google"
+    # Different existing model from same vendor on active set: allowed (enqueue succeeds without override)
+    assert check_vendor_rotation_guard(conn, set_id, "google-fast-2")["blocked"] is False
+    job_active = enqueue_run_job(conn, set_id=set_id, track="A", model_config_id="google-fast-2")
+    assert job_active
     # Different vendor: allowed
     assert check_vendor_rotation_guard(conn, set_id, "openai-fast")["blocked"] is False
+
+    # Once the set is retired for future model generations, newly untested models are blocked unless overridden
+    retire_set(conn, set_id)
+    assert check_vendor_rotation_guard(conn, set_id, "google-fast")["blocked"] is False
+    conn.execute(
+        """
+        INSERT INTO model_configs (id, vendor, family, tier, openrouter_id)
+        VALUES ('google-future-1', 'google', 'gemini-next', 'fast', 'openrouter/google/gemini-99')
+        """
+    )
+    conn.commit()
+    guard = check_vendor_rotation_guard(conn, set_id, "google-future-1")
+    assert guard["blocked"] is True
+    assert guard["vendor"] == "google"
+    with pytest.raises(RuntimeError):
+        enqueue_run_job(conn, set_id=set_id, track="A", model_config_id="google-future-1")
+    job_overridden = enqueue_run_job(
+        conn,
+        set_id=set_id,
+        track="A",
+        model_config_id="google-future-1",
+        override_reason="Intentional post-retirement check",
+    )
+    assert job_overridden
     conn.close()
 
 

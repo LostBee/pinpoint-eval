@@ -107,6 +107,8 @@ CREATE TABLE IF NOT EXISTS results (
     tool_calls_count INTEGER NOT NULL DEFAULT 0,
     tokens_in INTEGER NOT NULL DEFAULT 0,
     tokens_out INTEGER NOT NULL DEFAULT 0,
+    tokens_reasoning INTEGER NOT NULL DEFAULT 0,
+    tokens_cached INTEGER NOT NULL DEFAULT 0,
     latency_ms INTEGER NOT NULL DEFAULT 0,
     cost_usd REAL NOT NULL DEFAULT 0.0,
     distance_km REAL,
@@ -196,6 +198,12 @@ def init_db(conn: sqlite3.Connection) -> None:
     job_cols = {r["name"] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
     if "progress_text" not in job_cols:
         conn.execute("ALTER TABLE jobs ADD COLUMN progress_text TEXT")
+
+    res_cols = {r["name"] for r in conn.execute("PRAGMA table_info(results)").fetchall()}
+    if "tokens_reasoning" not in res_cols:
+        conn.execute("ALTER TABLE results ADD COLUMN tokens_reasoning INTEGER NOT NULL DEFAULT 0")
+    if "tokens_cached" not in res_cols:
+        conn.execute("ALTER TABLE results ADD COLUMN tokens_cached INTEGER NOT NULL DEFAULT 0")
 
     prompt_a = build_prompt("A")
     conn.execute(

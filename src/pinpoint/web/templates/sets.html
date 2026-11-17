@@ -29,7 +29,11 @@
       <tr>
         <td><strong>{{ s.name }} v{{ s.version }}</strong><div class="muted">{{ s.description or "" }}</div></td>
         <td>{{ s.member_count }}</td>
-        <td>{% if s.frozen_at %}Frozen{% else %}Mutable{% endif %}</td>
+        <td>
+          {% if s.expires_at %}<span class="badge badge-warn">Retired</span>
+          {% elif s.frozen_at %}<span class="badge badge-ok">Frozen (Active)</span>
+          {% else %}<span class="badge badge-blue">Mutable</span>{% endif %}
+        </td>
         <td><code>{{ s.commitment_hash[:16] ~ "..." if s.commitment_hash else "—" }}</code></td>
         <td>
           {% if not s.frozen_at and s.member_count > 0 %}
@@ -37,6 +41,13 @@
             <input type="hidden" name="set_id" value="{{ s.id }}" />
             <button type="submit">Freeze &amp; Hash</button>
           </form>
+          {% elif s.frozen_at and not s.expires_at %}
+          <form action="/sets/retire" method="post">
+            <input type="hidden" name="set_id" value="{{ s.id }}" />
+            <button type="submit" class="secondary" title="Mark retired when future model generations are released">Retire Set</button>
+          </form>
+          {% else %}
+          <span class="muted">—</span>
           {% endif %}
         </td>
       </tr>

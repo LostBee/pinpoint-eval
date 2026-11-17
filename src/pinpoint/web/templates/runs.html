@@ -47,6 +47,11 @@
 
   {% if guard and guard.blocked %}
   <div class="flash warn">{{ guard.message }}</div>
+  {% elif already_run_on_track %}
+  <div class="flash warn">
+    Config <code>{{ selected_model }}</code> already has an Official Track {{ selected_track }} run on this set.
+    Running it again records a <strong>Variance / Repeat</strong> run. To evaluate another model or thinking level as a new Official leaderboard entry, add a new row under <strong>Model Configs</strong> below.
+  </div>
   {% endif %}
 
   {% if selected_set and selected_model %}
@@ -109,7 +114,7 @@
 
 <div class="card">
   <h2>Model Configs (OpenRouter IDs &amp; Reasoning Effort)</h2>
-  <p class="muted">Follows OpenRouter <code>reasoning.effort</code> nomenclature (<code>none</code>, <code>minimal</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, <code>max</code>). To sweep thinking levels on the same model, add one config per effort level.</p>
+  <p class="muted">Follows OpenRouter <code>reasoning.effort</code> nomenclature (<code>none</code>, <code>minimal</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, <code>max</code>). Each config gets its own Official leaderboard row—add a new config for each model or thinking level you want to test. Configs with recorded runs are locked so past results are never overwritten.</p>
   <table>
     <thead><tr><th>ID</th><th>Vendor</th><th>Tier</th><th>OpenRouter Model ID</th><th>Reasoning Effort</th><th>Actions</th></tr></thead>
     <tbody>
@@ -118,6 +123,7 @@
         <td><code>{{ m.id }}</code></td>
         <td>{{ m.vendor }}</td>
         <td>{{ m.tier }}</td>
+        {% if (m.run_count or 0) == 0 %}
         <td>
           <input type="hidden" name="model_id" value="{{ m.id }}" form="upd-{{ loop.index }}" />
           <input type="text" name="openrouter_id" value="{{ m.openrouter_id }}" form="upd-{{ loop.index }}" style="width:300px;" />
@@ -135,16 +141,17 @@
             <form id="upd-{{ loop.index }}" action="/models/update" method="post">
               <button type="submit" class="secondary">Update</button>
             </form>
-            {% if (m.run_count or 0) == 0 %}
             <form action="/models/delete" method="post">
               <input type="hidden" name="model_id" value="{{ m.id }}" />
               <button type="submit" class="danger">Delete</button>
             </form>
-            {% else %}
-            <span class="muted">{{ m.run_count }} run(s)</span>
-            {% endif %}
           </div>
         </td>
+        {% else %}
+        <td><code>{{ m.openrouter_id }}</code></td>
+        <td><span class="badge badge-blue">{{ m.reasoning_effort or "default" }}</span></td>
+        <td><span class="badge badge-muted">Locked ({{ m.run_count }} run{{ "s" if m.run_count != 1 else "" }})</span></td>
+        {% endif %}
       </tr>
       {% endfor %}
     </tbody>
