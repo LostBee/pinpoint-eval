@@ -48,7 +48,7 @@
 {% if sets and pool_photos %}
 <div class="card">
   <h2>Add Pool Photos to a Set</h2>
-  <form action="/sets/add-photos" method="post">
+  <form action="/sets/add-photos" method="post" id="add-photos-form">
     <div class="row">
       <label>Target Set:
         <select name="set_id">
@@ -58,13 +58,17 @@
         </select>
       </label>
       <button type="submit">Add Selected Photos</button>
+      <button type="button" class="secondary" id="select-all-btn">Select All ({{ pool_photos|length }})</button>
+      <button type="button" class="secondary" id="select-pool-btn">Select Unassigned (pool)</button>
+      <button type="button" class="secondary" id="clear-all-btn">Clear</button>
+      <span id="selected-count" class="muted">0 selected</span>
     </div>
     <table>
-      <thead><tr><th>Pick</th><th>Photo</th><th>Country</th><th>Scene</th><th>Label</th><th>Status</th></tr></thead>
+      <thead><tr><th><label style="cursor:pointer;"><input type="checkbox" id="toggle-all-photos" /> All</label></th><th>Photo</th><th>Country</th><th>Scene</th><th>Label</th><th>Status</th></tr></thead>
       <tbody>
         {% for p in pool_photos %}
         <tr>
-          <td><input type="checkbox" name="photo_ids" value="{{ p.id }}" /></td>
+          <td><input type="checkbox" name="photo_ids" value="{{ p.id }}" data-status="{{ p.status }}" class="pool-photo-cb" /></td>
           <td><img src="/media/sanitized/{{ p.id }}" style="height:48px;border-radius:4px;" /> <code>{{ p.id[:8] }}</code></td>
           <td>{{ p.country_iso2 }} ({{ p.continent }})</td>
           <td>{{ p.scene_tag }}</td>
@@ -76,5 +80,44 @@
     </table>
   </form>
 </div>
+<script>
+(function () {
+  const form = document.getElementById("add-photos-form");
+  if (!form) return;
+  const boxes = Array.from(form.querySelectorAll(".pool-photo-cb"));
+  const toggleAll = document.getElementById("toggle-all-photos");
+  const countEl = document.getElementById("selected-count");
+
+  function updateCount() {
+    const checked = boxes.filter((b) => b.checked).length;
+    countEl.textContent = checked + " / " + boxes.length + " selected";
+    if (toggleAll) {
+      toggleAll.checked = boxes.length > 0 && checked === boxes.length;
+      toggleAll.indeterminate = checked > 0 && checked < boxes.length;
+    }
+  }
+
+  if (toggleAll) {
+    toggleAll.addEventListener("change", () => {
+      boxes.forEach((b) => { b.checked = toggleAll.checked; });
+      updateCount();
+    });
+  }
+  document.getElementById("select-all-btn")?.addEventListener("click", () => {
+    boxes.forEach((b) => { b.checked = true; });
+    updateCount();
+  });
+  document.getElementById("select-pool-btn")?.addEventListener("click", () => {
+    boxes.forEach((b) => { b.checked = b.dataset.status === "pool"; });
+    updateCount();
+  });
+  document.getElementById("clear-all-btn")?.addEventListener("click", () => {
+    boxes.forEach((b) => { b.checked = false; });
+    updateCount();
+  });
+  boxes.forEach((b) => b.addEventListener("change", updateCount));
+  updateCount();
+})();
+</script>
 {% endif %}
 {% endblock %}

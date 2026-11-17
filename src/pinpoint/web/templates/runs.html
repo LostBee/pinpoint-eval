@@ -111,28 +111,40 @@
   <h2>Model Configs (OpenRouter IDs &amp; Reasoning Effort)</h2>
   <p class="muted">Follows OpenRouter <code>reasoning.effort</code> nomenclature (<code>none</code>, <code>minimal</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, <code>max</code>). To sweep thinking levels on the same model, add one config per effort level.</p>
   <table>
-    <thead><tr><th>ID</th><th>Vendor</th><th>Tier</th><th>OpenRouter Model ID</th><th>Reasoning Effort</th><th>Save</th></tr></thead>
+    <thead><tr><th>ID</th><th>Vendor</th><th>Tier</th><th>OpenRouter Model ID</th><th>Reasoning Effort</th><th>Actions</th></tr></thead>
     <tbody>
       {% for m in models %}
       <tr>
         <td><code>{{ m.id }}</code></td>
         <td>{{ m.vendor }}</td>
         <td>{{ m.tier }}</td>
-        <form action="/models/update" method="post">
-          <td>
-            <input type="hidden" name="model_id" value="{{ m.id }}" />
-            <input type="text" name="openrouter_id" value="{{ m.openrouter_id }}" style="width:310px;" />
-          </td>
-          <td>
-            <select name="reasoning_effort">
-              <option value="" {% if not m.reasoning_effort %}selected{% endif %}>(default)</option>
-              {% for eff in reasoning_efforts %}
-              <option value="{{ eff }}" {% if m.reasoning_effort == eff %}selected{% endif %}>{{ eff }}</option>
-              {% endfor %}
-            </select>
-          </td>
-          <td><button type="submit" class="secondary">Update</button></td>
-        </form>
+        <td>
+          <input type="hidden" name="model_id" value="{{ m.id }}" form="upd-{{ loop.index }}" />
+          <input type="text" name="openrouter_id" value="{{ m.openrouter_id }}" form="upd-{{ loop.index }}" style="width:300px;" />
+        </td>
+        <td>
+          <select name="reasoning_effort" form="upd-{{ loop.index }}">
+            <option value="" {% if not m.reasoning_effort %}selected{% endif %}>(default)</option>
+            {% for eff in reasoning_efforts %}
+            <option value="{{ eff }}" {% if m.reasoning_effort == eff %}selected{% endif %}>{{ eff }}</option>
+            {% endfor %}
+          </select>
+        </td>
+        <td>
+          <div class="row" style="margin-bottom:0;">
+            <form id="upd-{{ loop.index }}" action="/models/update" method="post">
+              <button type="submit" class="secondary">Update</button>
+            </form>
+            {% if (m.run_count or 0) == 0 %}
+            <form action="/models/delete" method="post">
+              <input type="hidden" name="model_id" value="{{ m.id }}" />
+              <button type="submit" class="danger">Delete</button>
+            </form>
+            {% else %}
+            <span class="muted">{{ m.run_count }} run(s)</span>
+            {% endif %}
+          </div>
+        </td>
       </tr>
       {% endfor %}
     </tbody>

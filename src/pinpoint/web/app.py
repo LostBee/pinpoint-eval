@@ -397,6 +397,14 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
                 dict(r)
                 for r in conn.execute("SELECT * FROM model_configs ORDER BY vendor, id").fetchall()
             ]
+            run_counts = {
+                r["model_config_id"]: r["cnt"]
+                for r in conn.execute(
+                    "SELECT model_config_id, COUNT(*) AS cnt FROM runs GROUP BY model_config_id"
+                ).fetchall()
+            }
+            for m in models:
+                m["run_count"] = run_counts.get(m["id"], 0)
             jobs = []
             for r in conn.execute("SELECT * FROM jobs ORDER BY created_at DESC LIMIT 30").fetchall():
                 d = dict(r)
@@ -480,6 +488,34 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
             conn.commit()
             return RedirectResponse(url="/runs?msg=Updated+model+config", status_code=303)
         except (ValueError, sqlite3.Error) as exc:
+            return RedirectResponse(url=f"/runs?err={str(exc).replace(' ', '+')}", status_code=303)
+        finally:
+            conn.close()
+
+    @app.post("/models/delete")
+    def models_delete(model_id: str = Form(...)):
+        conn = _db()
+        try:
+            run_cnt = conn.execute(
+                "SELECT COUNT(*) AS c FROM runs WHERE model_config_id = ?", (model_id,)
+            ).fetchone()["c"]
+            if run_cnt > 0:
+                return RedirectResponse(
+                    url=f"/runs?err=Cannot+delete+{model_id}:+{run_cnt}+recorded+run(s)+reference+it",
+                    status_code=303,
+                )
+            active_jobs = conn.execute(
+                "SELECT payload_json FROM jobs WHERE state IN ('pending', 'running')"
+            ).fetchall()
+            if any(json.loads(j["payload_json"]).get("model_config_id") == model_id for j in active_jobs):
+                return RedirectResponse(
+                    url=f"/runs?err=Cannot+delete+{model_id}:+pending+or+running+job+references+it",
+                    status_code=303,
+                )
+            conn.execute("DELETE FROM model_configs WHERE id = ?", (model_id,))
+            conn.commit()
+            return RedirectResponse(url=f"/runs?msg=Deleted+model+{model_id}", status_code=303)
+        except sqlite3.Error as exc:
             return RedirectResponse(url=f"/runs?err={str(exc).replace(' ', '+')}", status_code=303)
         finally:
             conn.close()

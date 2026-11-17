@@ -187,10 +187,32 @@ def test_execute_single_job_forwards_reasoning_effort(tmp_path: Path, monkeypatc
 
 def test_web_ui_routes_smoke(tmp_path: Path):
     cfg = PinpointConfig(repo_root=tmp_path / "repo", data_dir=tmp_path / "data")
+    cfg.ensure_dirs()
+    conn = connect_db(cfg.db_path)
+    init_db(conn)
+    p = cfg.inbox_dir / "PXL_smoke.jpg"
+    Image.new("RGB", (320, 240), color=(30, 60, 90)).save(p, format="JPEG")
+    ingest_photo(conn, cfg, p, lat=49.6116, lon=6.1319, country_input="LU")
+    conn.close()
+
     app = create_app(cfg=cfg, start_worker=False)
     with TestClient(app) as client:
         assert client.get("/").status_code == 200
-        assert client.get("/pool").status_code == 200
-        assert client.get("/sets").status_code == 200
+        pool_resp = client.get("/pool")
+        assert pool_resp.status_code == 200
+        assert "openstreetmap.org/?mlat=49.6116" in pool_resp.text
+        assert "google.com/maps?q=49.6116,6.1319" in pool_resp.text
+        client.post("/sets/create", data={"name": "europe", "version": "1"})
+        sets_resp = client.get("/sets")
+        assert sets_resp.status_code == 200
+        assert "select-all-btn" in sets_resp.text
+        assert "toggle-all-photos" in sets_resp.text
         assert client.get("/runs").status_code == 200
+        # Add and delete a custom model config; confirm seed models stay deleted on re-init
+        del_resp = client.post("/models/delete", data={"model_id": "xai-fast"})
+        assert del_resp.status_code == 200 and "Deleted" in del_resp.text
+        conn2 = connect_db(cfg.db_path)
+        init_db(conn2)
+        assert conn2.execute("SELECT 1 FROM model_configs WHERE id = 'xai-fast'").fetchone() is None
+        conn2.close()
         assert client.get("/results").status_code == 200

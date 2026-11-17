@@ -56,6 +56,8 @@ Open `http://127.0.0.1:8000` to:
 3. Configure OpenRouter model slugs & `reasoning.effort` levels and run strictly 1-photo-at-a-time queued jobs (`/runs`)
 4. Inspect leaderboards, tier breakdowns, local maps, and export safe Option-1 bundles to `results/` (`/results`, or run `pinpoint export-public`)
 
+See [docs/phase1-runbook.md](docs/phase1-runbook.md) for the step-by-step Phase 1 checklist, [docs/architecture.md](docs/architecture.md) for the system architecture & scoring methodology, and [docs/design-requirements.md](docs/design-requirements.md) for the core design principles.
+
 ## Development & Tests
 
 ```powershell

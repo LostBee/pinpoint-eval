@@ -1,0 +1,5 @@
+{% macro map_links(lat, lon) -%}
+<a href="https://www.openstreetmap.org/?mlat={{ lat }}&mlon={{ lon }}#map=16/{{ lat }}/{{ lon }}" target="_blank" rel="noopener" style="color:#93c5fd;">OSM</a>
+·
+<a href="https://www.google.com/maps?q={{ lat }},{{ lon }}" target="_blank" rel="noopener" style="color:#93c5fd;">Google Maps</a>
+{%- endmacro %}

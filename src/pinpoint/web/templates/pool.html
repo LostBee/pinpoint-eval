@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import map_links %}
 {% block content %}
 <div class="card">
   <div class="row" style="justify-content:space-between;">
@@ -52,7 +53,7 @@
         {% if p.is_frozen %}
         <td>
           {{ "%.5f"|format(p.lat) }}, {{ "%.5f"|format(p.lon) }}
-          <div><a href="https://www.openstreetmap.org/?mlat={{ p.lat }}&mlon={{ p.lon }}#map=16/{{ p.lat }}/{{ p.lon }}" target="_blank" style="color:#93c5fd;">Open in OSM</a></div>
+          <div>{{ map_links(p.lat, p.lon) }}</div>
         </td>
         <td><strong>{{ p.country_iso2 }}</strong> ({{ p.continent }}) · {{ p.scene_tag }}<div class="muted">{{ p.place_label or "" }}</div></td>
         <td>
@@ -67,7 +68,7 @@
           <td>
             <input type="number" step="any" name="lat" value="{{ p.lat }}" style="width:95px;" required />
             <input type="number" step="any" name="lon" value="{{ p.lon }}" style="width:95px;" required />
-            <div><a href="https://www.openstreetmap.org/?mlat={{ p.lat }}&mlon={{ p.lon }}#map=16/{{ p.lat }}/{{ p.lon }}" target="_blank" style="color:#93c5fd;">Open in OSM</a></div>
+            <div>{{ map_links(p.lat, p.lon) }}</div>
           </td>
           <td>
             <div class="row">

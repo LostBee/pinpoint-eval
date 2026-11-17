@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import map_links %}
 {% block content %}
 <div class="card">
   <h2>Inbox Review ({{ items|length }} pending · {{ pool_count }} ingested)</h2>
@@ -26,7 +27,7 @@
     <div class="muted">
       {{ item.meta.camera_model or "Unknown camera" }} · {{ item.meta.taken_date or "No EXIF date" }}
       {% if item.meta.lat is not none and item.meta.lon is not none %}
-        · <a href="https://www.openstreetmap.org/?mlat={{ item.meta.lat }}&mlon={{ item.meta.lon }}#map=16/{{ item.meta.lat }}/{{ item.meta.lon }}" target="_blank" style="color:#93c5fd;">Open in OSM</a>
+        · {{ map_links(item.meta.lat, item.meta.lon) }}
       {% endif %}
     </div>
     <form action="/inbox/ingest" method="post" style="margin-top:10px;">

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import map_links %}
 {% block content %}
 <div class="card">
   <h2>Run <code>{{ run.id[:8] }}</code> · {{ run.set_name }} v{{ run.set_version }} · Track {{ run.track }}</h2>
@@ -29,13 +30,13 @@
         </td>
         <td>
           <strong>{{ row.gt_country }}</strong>
-          <a href="https://www.openstreetmap.org/?mlat={{ row.gt_lat }}&mlon={{ row.gt_lon }}#map=16/{{ row.gt_lat }}/{{ row.gt_lon }}" target="_blank" style="color:#93c5fd;">OSM</a>
+          {{ map_links(row.gt_lat, row.gt_lon) }}
           <div class="muted">{{ "%.4f"|format(row.gt_lat) }}, {{ "%.4f"|format(row.gt_lon) }} · {{ row.place_label or "" }}</div>
         </td>
         <td>
           <strong>{{ row.pred_country_iso2 or "—" }}</strong>
           {% if row.pred_lat is not none %}
-            <a href="https://www.openstreetmap.org/?mlat={{ row.pred_lat }}&mlon={{ row.pred_lon }}#map=16/{{ row.pred_lat }}/{{ row.pred_lon }}" target="_blank" style="color:#93c5fd;">OSM</a>
+            {{ map_links(row.pred_lat, row.pred_lon) }}
             <div class="muted">{{ "%.4f"|format(row.pred_lat) }}, {{ "%.4f"|format(row.pred_lon) }}</div>
           {% endif %}
           <div class="muted">{{ row.reasoning_text or "" }}</div>

@@ -131,6 +131,11 @@ CREATE TABLE IF NOT EXISTS jobs (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS app_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 # Starter fast-tier models via OpenRouter (verify/edit model IDs or reasoning_effort in UI).
@@ -201,21 +206,25 @@ def init_db(conn: sqlite3.Connection) -> None:
         (PROMPT_V1_ID, prompt_hash(prompt_a), prompt_a, schema_json(), utc_now()),
     )
 
-    for m in SEED_MODELS:
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO model_configs
-                (id, vendor, family, tier, openrouter_id, reasoning_effort, params_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                m["id"],
-                m["vendor"],
-                m["family"],
-                m["tier"],
-                m["openrouter_id"],
-                m["reasoning_effort"],
-                m["params_json"],
-            ),
-        )
+    seeded = conn.execute("SELECT value FROM app_meta WHERE key = 'seeded_models'").fetchone()
+    existing_models = conn.execute("SELECT COUNT(*) AS c FROM model_configs").fetchone()["c"]
+    if seeded is None and existing_models == 0:
+        for m in SEED_MODELS:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO model_configs
+                    (id, vendor, family, tier, openrouter_id, reasoning_effort, params_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    m["id"],
+                    m["vendor"],
+                    m["family"],
+                    m["tier"],
+                    m["openrouter_id"],
+                    m["reasoning_effort"],
+                    m["params_json"],
+                ),
+            )
+    conn.execute("INSERT OR IGNORE INTO app_meta (key, value) VALUES ('seeded_models', '1')")
     conn.commit()
