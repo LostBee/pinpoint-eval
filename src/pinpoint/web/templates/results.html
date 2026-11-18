@@ -70,7 +70,7 @@
         <td>{% if (a.total_time_s or 0) >= 60 %}{{ "%.1f min"|format(a.total_time_s / 60) }}{% else %}{{ "%.1f s"|format(a.total_time_s or 0) }}{% endif %}</td>
         <td>{{ "%.2f s"|format(a.mean_latency_s or 0) }}</td>
         <td>${{ "%.4f"|format(a.total_cost_usd) }}</td>
-        <td><a href="/results/{{ r.id }}" style="color:#93c5fd;">Inspect</a></td>
+        <td><a href="/results/official/{{ r.set_id }}/{{ r.track }}/{{ r.model_config_id }}" style="color:#93c5fd;">Inspect</a></td>
       </tr>
       {% endfor %}
     </tbody>
@@ -201,7 +201,7 @@
         <td>{{ "%.2f s"|format(a.mean_latency_s or 0) }}</td>
         <td>{{ a.mean_tokens_reasoning or 0 }} avg</td>
         <td>${{ "%.4f"|format(a.total_cost_usd) }}</td>
-        <td><a href="/results/{{ r.id }}" style="color:#93c5fd;">Inspect</a></td>
+        <td><a href="/results/official/{{ r.set_id }}/{{ r.track }}/{{ r.model_config_id }}" style="color:#93c5fd;">Inspect</a></td>
       </tr>
       {% endfor %}
     </tbody>

@@ -1,14 +1,9 @@
 {% extends "base.html" %}
-{% block head %}
-  {% if has_active_jobs %}
-  <meta http-equiv="refresh" content="3" />
-  {% endif %}
-{% endblock %}
 {% block content %}
 {% if has_active_jobs %}
 <div class="flash info row" style="justify-content:space-between;">
-  <span>Worker active — auto-refreshing every 3 seconds...</span>
-  <a href="/runs" style="color:#f8fafc;font-weight:600;">Refresh now</a>
+  <span>Worker active — click Refresh to update progress (auto-refresh disabled so forms stay editable).</span>
+  <a href="/runs" style="color:#f8fafc;font-weight:600;">Refresh</a>
 </div>
 {% endif %}
 
@@ -102,7 +97,7 @@
           {% elif j.state == 'failed' %}
           <form action="/jobs/retry" method="post">
             <input type="hidden" name="job_id" value="{{ j.id }}" />
-            <button type="submit" class="secondary">Retry</button>
+            <button type="submit" class="secondary">Retry / Resume</button>
           </form>
           {% endif %}
         </td>

@@ -107,6 +107,7 @@ def _record_job_progress(cfg: PinpointConfig) -> None:
     job_id = os.getenv("PINPOINT_JOB_ID")
     if not job_id:
         return
+    offset = int(os.getenv("PINPOINT_JOB_DONE_OFFSET") or "0")
     _progress_done += 1
     total = os.getenv("PINPOINT_JOB_TOTAL") or "?"
     try:
@@ -114,7 +115,7 @@ def _record_job_progress(cfg: PinpointConfig) -> None:
         try:
             conn.execute(
                 "UPDATE jobs SET progress_text = ? WHERE id = ?",
-                (f"{_progress_done} / {total} photos", job_id),
+                (f"{offset + _progress_done} / {total} photos", job_id),
             )
             conn.commit()
         finally:

@@ -174,6 +174,7 @@ def test_execute_single_job_forwards_reasoning_effort(tmp_path: Path, monkeypatc
 
         class _Log:
             location = str(tmp_path / "fake.eval")
+            status = "success"
 
         return [_Log()]
 
@@ -276,3 +277,98 @@ def test_openrouter_cost_and_telemetry_extraction():
     assert agg["mean_tokens_reasoning"] == 305
     assert agg["mean_tokens_in"] == 5514
     assert agg["total_cost_usd"] == 0.006216
+
+
+def test_resume_skips_completed_photos_and_no_autorefresh(tmp_path: Path, monkeypatch):
+    from pinpoint.importer import collect_official_leaderboard
+
+    cfg = PinpointConfig(repo_root=tmp_path / "repo", data_dir=tmp_path / "data")
+    cfg.ensure_dirs()
+    conn = connect_db(cfg.db_path)
+    init_db(conn)
+
+    p1 = cfg.inbox_dir / "PXL_r1.jpg"
+    p2 = cfg.inbox_dir / "PXL_r2.jpg"
+    Image.new("RGB", (320, 240), color=(10, 20, 30)).save(p1, format="JPEG")
+    Image.new("RGB", (320, 240), color=(40, 50, 60)).save(p2, format="JPEG")
+    id1 = ingest_photo(conn, cfg, p1, lat=49.6116, lon=6.1319, country_input="LU")
+    id2 = ingest_photo(conn, cfg, p2, lat=48.8566, lon=2.3522, country_input="FR")
+
+    set_id = create_image_set(conn, name="europe", version=1)
+    add_photos_to_set(conn, set_id, [id1, id2])
+    freeze_set(conn, set_id)
+
+    # Simulate partial interrupted run that completed only id1
+    mock_partial = get_model(
+        "mockllm/model",
+        custom_outputs=[
+            ModelOutput.from_content(
+                model="mockllm/model",
+                content='{"status":"ok","country":"LU","latitude":49.6116,"longitude":6.1319,"confidence":0.9,"reasoning":"Done 1"}',
+            )
+        ],
+    )
+    task = build_pinpoint_task(set_id=set_id, track="A", data_dir=str(cfg.data_dir))
+    logs1 = inspect_eval(
+        task,
+        model=mock_partial,
+        log_dir=str(cfg.logs_dir),
+        sample_id=[id1],
+        max_samples=1,
+        max_connections=1,
+        display="none",
+    )
+    import_eval_log(
+        conn,
+        log_path=logs1[0].location,
+        run_id="run-part-1",
+        set_id=set_id,
+        track="A",
+        model_config_id="google-fast",
+        prompt_version_id=PROMPT_V1_ID,
+        run_status_override="incomplete",
+    )
+
+    job_id = enqueue_run_job(conn, set_id=set_id, track="A", model_config_id="google-fast")
+    conn.commit()
+
+    # Ensure /runs has no meta http-equiv="refresh" even when a pending job exists
+    app = create_app(cfg=cfg, start_worker=False)
+    with TestClient(app) as client:
+        runs_html = client.get("/runs").text
+        assert 'http-equiv="refresh"' not in runs_html
+
+    # Resuming executes ONLY remaining sample [id2]
+    captured: dict = {}
+
+    def resume_inspect_eval(task_obj, **kwargs):
+        captured["sample_id"] = kwargs.get("sample_id")
+        mock_rest = get_model(
+            "mockllm/model",
+            custom_outputs=[
+                ModelOutput.from_content(
+                    model="mockllm/model",
+                    content='{"status":"ok","country":"FR","latitude":48.8566,"longitude":2.3522,"confidence":0.9,"reasoning":"Done 2"}',
+                )
+            ],
+        )
+        return inspect_eval(
+            task_obj,
+            model=mock_rest,
+            log_dir=str(cfg.logs_dir),
+            sample_id=kwargs.get("sample_id"),
+            max_samples=1,
+            max_connections=1,
+            display="none",
+        )
+
+    monkeypatch.setattr("pinpoint.runner.inspect_eval", resume_inspect_eval)
+    execute_single_job(cfg, job_id)
+    assert captured["sample_id"] == [id2]
+
+    # Leaderboard merges both partial chunks into a single 2-photo official entry
+    off_a, _ = collect_official_leaderboard(conn, set_id=set_id)
+    assert len(off_a) == 1
+    assert off_a[0]["agg"]["count"] == 2
+    assert off_a[0]["agg"]["strict_mean_points"] == 15.0
+    conn.close()

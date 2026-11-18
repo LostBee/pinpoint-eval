@@ -32,6 +32,7 @@ from pinpoint.geo import (
     european_country_choices,
     normalize_country,
 )
+from pinpoint.importer import collect_official_leaderboard
 from pinpoint.ingest import SUPPORTED_EXTENSIONS, ingest_photo, list_inbox_files, read_exif_metadata
 from pinpoint.runner import (
     SequentialJobWorker,
@@ -618,12 +619,19 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
     def jobs_retry(job_id: str = Form(...)):
         conn = _db()
         try:
-            conn.execute(
-                "UPDATE jobs SET state = 'pending', error = NULL WHERE id = ? AND state = 'failed'",
-                (job_id,),
-            )
-            conn.commit()
-            return RedirectResponse(url="/runs?msg=Re-queued+failed+job", status_code=303)
+            row = conn.execute(
+                "SELECT payload_json FROM jobs WHERE id = ? AND state = 'failed'", (job_id,)
+            ).fetchone()
+            if row:
+                payload = json.loads(row["payload_json"])
+                if not payload.get("photo_id"):
+                    payload["resume"] = True
+                conn.execute(
+                    "UPDATE jobs SET state = 'pending', error = NULL, payload_json = ? WHERE id = ? AND state = 'failed'",
+                    (json.dumps(payload), job_id),
+                )
+                conn.commit()
+            return RedirectResponse(url="/runs?msg=Re-queued+job+to+resume+remaining+photos", status_code=303)
         finally:
             conn.close()
 
@@ -658,8 +666,6 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
                 set_params,
             ).fetchall()
 
-            official_a: list[dict] = []
-            official_b: list[dict] = []
             history_runs: list[dict] = []
 
             for r in runs:
@@ -688,23 +694,9 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
                     }
                 )
 
-                if is_official_run:
-                    agg_off = aggregate_run_metrics(official_res)
-                    agg_off["total_searches"] = sum(
-                        int(x.get("tool_calls_count") or 0) for x in official_res
-                    )
-                    item = {"run": r_dict, "agg": agg_off}
-                    if r["track"] == "A":
-                        official_a.append(item)
-                    else:
-                        official_b.append(item)
-
-            sort_key = lambda x: (
-                -x["agg"]["strict_mean_points"],
-                x["agg"]["median_distance_km"] if x["agg"]["median_distance_km"] is not None else 999999.0,
+            official_a, official_b = collect_official_leaderboard(
+                conn, set_id=selected_set or None
             )
-            official_a.sort(key=sort_key)
-            official_b.sort(key=sort_key)
             history_runs.reverse()
 
             map_where = "WHERE res.is_official = 1" + (" AND r.set_id = ?" if where_set else "")
@@ -748,6 +740,61 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
                 "msg": msg,
                 "err": err,
             },
+        )
+
+    @app.get("/results/official/{set_id}/{track}/{model_config_id}", response_class=HTMLResponse)
+    def official_detail_page(request: Request, set_id: str, track: str, model_config_id: str):
+        conn = _db()
+        try:
+            meta = conn.execute(
+                """
+                SELECT s.name AS set_name, s.version AS set_version,
+                       mc.vendor, mc.openrouter_id, mc.reasoning_effort
+                FROM image_sets s, model_configs mc
+                WHERE s.id = ? AND mc.id = ?
+                """,
+                (set_id, model_config_id),
+            ).fetchone()
+            if not meta:
+                raise HTTPException(status_code=404, detail="Set or model not found")
+            rows = [
+                dict(r)
+                for r in conn.execute(
+                    """
+                    SELECT res.*, p.country_iso2 AS gt_country, p.lat AS gt_lat, p.lon AS gt_lon,
+                           p.place_label, p.scene_tag, p.near_border,
+                           r_tbl.track, mc.vendor, mc.openrouter_id, mc.reasoning_effort
+                    FROM results res
+                    JOIN photos p ON p.id = res.photo_id
+                    JOIN runs r_tbl ON r_tbl.id = res.run_id
+                    JOIN model_configs mc ON mc.id = r_tbl.model_config_id
+                    WHERE r_tbl.set_id = ? AND r_tbl.track = ? AND r_tbl.model_config_id = ?
+                      AND res.is_official = 1
+                    ORDER BY res.photo_id ASC
+                    """,
+                    (set_id, track.upper(), model_config_id),
+                ).fetchall()
+            ]
+            for row in rows:
+                row["model_label"] = format_model_label(
+                    row["openrouter_id"], row.get("reasoning_effort")
+                )
+            run_dict = {
+                "id": f"official-{model_config_id}",
+                "set_id": set_id,
+                "set_name": meta["set_name"],
+                "set_version": meta["set_version"],
+                "track": track.upper(),
+                "model_config_id": model_config_id,
+                "model_label": format_model_label(meta["openrouter_id"], meta["reasoning_effort"]),
+                "status": f"Official ({len(rows)} photos)",
+                "inspect_log_path": "Combined official results across run/resume logs",
+            }
+            map_svg = build_guess_map_svg(rows, f"Official {track.upper()} — {run_dict['model_label']}")
+        finally:
+            conn.close()
+        return templates.TemplateResponse(
+            request, "run_detail.html", {"run": run_dict, "rows": rows, "map_svg": map_svg}
         )
 
     @app.get("/results/{run_id}", response_class=HTMLResponse)

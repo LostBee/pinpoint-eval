@@ -30,7 +30,11 @@ from pinpoint.config import (
 )
 from pinpoint.db import connect_db, utc_now
 from pinpoint.geo import aggregate_run_metrics
-from pinpoint.importer import import_eval_log
+from pinpoint.importer import (
+    collect_official_leaderboard,
+    import_eval_log,
+    recover_partial_eval_logs,
+)
 from pinpoint.prompts import PROMPT_V1_ID
 from pinpoint.sets import check_vendor_rotation_guard, freeze_set
 from pinpoint.tasks import build_pinpoint_task
@@ -168,8 +172,72 @@ def ensure_inspect_model_cost(
     return model_cost
 
 
+def _official_completed_photo_ids(
+    conn: sqlite3.Connection,
+    set_id: str,
+    track: str,
+    model_config_id: str,
+) -> set[str]:
+    rows = conn.execute(
+        """
+        SELECT DISTINCT res.photo_id
+        FROM results res
+        JOIN runs r ON r.id = res.run_id
+        WHERE r.set_id = ?
+          AND r.track = ?
+          AND r.model_config_id = ?
+          AND res.is_official = 1
+          AND res.parse_status != 'api_error'
+        """,
+        (set_id, track.upper(), model_config_id),
+    ).fetchall()
+    return {str(r["photo_id"]) for r in rows}
+
+
+def _recover_job_progress(
+    conn: sqlite3.Connection,
+    cfg: PinpointConfig,
+    payload: dict[str, Any],
+) -> tuple[list[str], list[str]]:
+    """Import any partial .eval logs for this job and return (all_set_photo_ids, remaining_ids)."""
+    set_id = str(payload["set_id"])
+    track = str(payload["track"]).upper()
+    model_config_id = str(payload["model_config_id"])
+    model = conn.execute(
+        "SELECT openrouter_id, reasoning_effort FROM model_configs WHERE id = ?",
+        (model_config_id,),
+    ).fetchone()
+    if model:
+        recover_partial_eval_logs(
+            conn=conn,
+            logs_dir=cfg.logs_dir,
+            set_id=set_id,
+            track=track,
+            model_config_id=model_config_id,
+            openrouter_id=model["openrouter_id"],
+            reasoning_effort=model["reasoning_effort"],
+            prompt_version_id=PROMPT_V1_ID,
+            git_commit=get_git_commit(cfg.repo_root),
+        )
+
+    all_ids = [
+        str(r["photo_id"])
+        for r in conn.execute(
+            "SELECT photo_id FROM set_members WHERE set_id = ? ORDER BY position ASC, photo_id ASC",
+            (set_id,),
+        ).fetchall()
+    ]
+    done_ids = _official_completed_photo_ids(conn, set_id, track, model_config_id)
+    remaining_ids = [pid for pid in all_ids if pid not in done_ids]
+    return all_ids, remaining_ids
+
+
 def execute_single_job(cfg: PinpointConfig, job_id: str) -> str:
-    """Run one queued job via Inspect AI (strictly 1 photo at a time) and import results."""
+    """Run one queued job via Inspect AI (strictly 1 photo at a time) and import results.
+
+    Automatically resumes interrupted set runs from the remaining unevaluated photos
+    without re-running already-completed samples.
+    """
     conn = connect_db(cfg.db_path)
     try:
         job = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
@@ -189,7 +257,26 @@ def execute_single_job(cfg: PinpointConfig, job_id: str) -> str:
             track=payload["track"],
             data_dir=str(cfg.data_dir),
         )
-        sample_id = [payload["photo_id"]] if payload.get("photo_id") else None
+        sample_id: list[str] | None
+        if payload.get("photo_id"):
+            sample_id = [payload["photo_id"]]
+        else:
+            all_ids, remaining_ids = _recover_job_progress(conn, cfg, payload)
+            done_count = len(all_ids) - len(remaining_ids)
+            should_resume = bool(payload.get("resume")) or (0 < done_count < len(all_ids))
+            if should_resume:
+                if not remaining_ids:
+                    return "resumed-complete"
+                sample_id = remaining_ids
+                os.environ["PINPOINT_JOB_DONE_OFFSET"] = str(done_count)
+                conn.execute(
+                    "UPDATE jobs SET progress_text = ?, updated_at = ? WHERE id = ?",
+                    (f"{done_count} / {len(all_ids)} photos", utc_now(), job_id),
+                )
+                conn.commit()
+            else:
+                sample_id = None
+
         model_name = normalize_openrouter_id(model["openrouter_id"])
         effort = normalize_reasoning_effort(model["reasoning_effort"])
         model_cost = ensure_inspect_model_cost(
@@ -214,8 +301,11 @@ def execute_single_job(cfg: PinpointConfig, job_id: str) -> str:
 
         logs = inspect_eval(task, **eval_kwargs)
         if not logs or not logs[0].location:
-            raise RuntimeError("Inspect eval produced no log location.")
+            if not payload.get("photo_id"):
+                _recover_job_progress(conn, cfg, payload)
+            raise RuntimeError("Inspect eval interrupted or produced no log location; progress saved.")
 
+        is_complete = logs[0].status == "success"
         import_eval_log(
             conn=conn,
             log_path=logs[0].location,
@@ -226,7 +316,11 @@ def execute_single_job(cfg: PinpointConfig, job_id: str) -> str:
             prompt_version_id=PROMPT_V1_ID,
             git_commit=get_git_commit(cfg.repo_root),
             override_reason=payload.get("override_reason"),
+            skip_sample_errors=not is_complete,
+            run_status_override=None if is_complete else "incomplete",
         )
+        if not is_complete:
+            raise RuntimeError(f"Inspect eval ended with status '{logs[0].status}'; completed photos saved.")
         return run_id
     finally:
         conn.close()
@@ -241,9 +335,33 @@ class SequentialJobWorker:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
+    def _recover_interrupted_running_jobs(self) -> None:
+        """Mark stale 'running' jobs left after an unclean shutdown as resumable 'failed'."""
+        conn = connect_db(self.cfg.db_path)
+        try:
+            stale = conn.execute(
+                "SELECT id, payload_json FROM jobs WHERE state = 'running'"
+            ).fetchall()
+            for j in stale:
+                payload = json.loads(j["payload_json"])
+                prog = None
+                if not payload.get("photo_id"):
+                    all_ids, remaining_ids = _recover_job_progress(conn, self.cfg, payload)
+                    prog = f"{len(all_ids) - len(remaining_ids)} / {len(all_ids)} photos"
+                conn.execute(
+                    "UPDATE jobs SET state = 'failed', progress_text = COALESCE(?, progress_text), "
+                    "error = COALESCE(error, 'Interrupted when server stopped; click Retry / Resume to continue.'), "
+                    "updated_at = ? WHERE id = ?",
+                    (prog, utc_now(), j["id"]),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
+        self._recover_interrupted_running_jobs()
         self._stop.clear()
         self._thread = threading.Thread(target=self._loop, daemon=True, name="pinpoint-worker")
         self._thread.start()
@@ -312,6 +430,9 @@ class SequentialJobWorker:
 
         conn = connect_db(self.cfg.db_path)
         try:
+            if state != "done" and not payload.get("photo_id"):
+                all_ids, remaining_ids = _recover_job_progress(conn, self.cfg, payload)
+                prog = f"{len(all_ids) - len(remaining_ids)} / {len(all_ids)} photos"
             conn.execute(
                 "UPDATE jobs SET state = ?, progress_text = COALESCE(?, progress_text), error = ?, updated_at = ? WHERE id = ?",
                 (state, prog, err, utc_now(), job_id),
@@ -336,8 +457,6 @@ def export_summary_files(conn: sqlite3.Connection, cfg: PinpointConfig) -> tuple
     ).fetchall()
 
     summary_rows: list[dict[str, Any]] = []
-    official_a: list[dict[str, Any]] = []
-    official_b: list[dict[str, Any]] = []
     for r in runs:
         res_rows = [
             dict(row)
@@ -364,13 +483,8 @@ def export_summary_files(conn: sqlite3.Connection, cfg: PinpointConfig) -> tuple
                 **agg,
             }
         )
-        if is_off:
-            item = {"run": dict(r), "agg": aggregate_run_metrics(official_res)}
-            if r["track"] == "A":
-                official_a.append(item)
-            else:
-                official_b.append(item)
 
+    official_a, official_b = collect_official_leaderboard(conn)
     json_path = cfg.exports_dir / "summary.json"
     json_path.write_text(json.dumps(summary_rows, indent=2), encoding="utf-8")
 
@@ -475,34 +589,10 @@ def export_public_release(
     }
     (out_dir / "commitment.json").write_text(json.dumps(commitment, indent=2), encoding="utf-8")
 
-    runs = conn.execute(
-        """
-        SELECT r.*, s.name AS set_name, s.version AS set_version,
-               mc.vendor, mc.family, mc.openrouter_id, mc.reasoning_effort
-        FROM runs r
-        JOIN image_sets s ON s.id = r.set_id
-        JOIN model_configs mc ON mc.id = r.model_config_id
-        WHERE r.set_id = ?
-        ORDER BY r.started_at ASC
-        """,
-        (set_row["id"],),
-    ).fetchall()
-
-    official_a: list[dict[str, Any]] = []
-    official_b: list[dict[str, Any]] = []
+    official_a, official_b = collect_official_leaderboard(conn, set_id=set_row["id"])
     public_summary: list[dict[str, Any]] = []
-    for r in runs:
-        official_res = [
-            dict(row)
-            for row in conn.execute(
-                "SELECT * FROM results WHERE run_id = ? AND is_official = 1", (r["id"],)
-            ).fetchall()
-        ]
-        if not official_res:
-            continue
-        agg = aggregate_run_metrics(official_res)
-        agg["total_searches"] = sum(int(x.get("tool_calls_count") or 0) for x in official_res)
-        lbl = format_model_label(r["openrouter_id"], r["reasoning_effort"])
+    for item in official_a + official_b:
+        r, agg = item["run"], item["agg"]
         public_summary.append(
             {
                 "set": f"{set_row['name']} v{set_row['version']}",
@@ -511,23 +601,11 @@ def export_public_release(
                 "model_config_id": r["model_config_id"],
                 "model_id": r["openrouter_id"],
                 "reasoning_effort": r["reasoning_effort"],
-                "model_label": lbl,
+                "model_label": r["model_label"],
                 "started_at": r["started_at"],
                 **agg,
             }
         )
-        item = {"run": dict(r), "agg": agg}
-        if r["track"] == "A":
-            official_a.append(item)
-        else:
-            official_b.append(item)
-
-    sort_key = lambda x: (
-        -x["agg"]["strict_mean_points"],
-        x["agg"]["median_distance_km"] if x["agg"]["median_distance_km"] is not None else 999999.0,
-    )
-    official_a.sort(key=sort_key)
-    official_b.sort(key=sort_key)
     (out_dir / "summary.json").write_text(json.dumps(public_summary, indent=2), encoding="utf-8")
 
     ranking_svg = build_ranking_bars_svg(official_a, official_b)
