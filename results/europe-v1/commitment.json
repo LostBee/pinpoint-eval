@@ -1,0 +1,10 @@
+{
+  "set_name": "europe",
+  "version": 1,
+  "description": "Phase 1",
+  "photo_count": 208,
+  "frozen_at": "2026-11-17T14:30:22.803289+00:00",
+  "commitment_hash": "42b0458fee23b6032af8b3e4a62caad6ba5437a76eeeba732241371e167e9bc0",
+  "public_redaction_mode": "option_1_bullseye_only",
+  "note": "Salt and exact ground-truth coordinates stay private until this set is retired."
+}

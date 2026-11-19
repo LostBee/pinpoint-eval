@@ -5,8 +5,11 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import math
 import os
+import random
 import sqlite3
+import statistics
 import subprocess
 import sys
 import threading
@@ -672,7 +675,418 @@ def export_public_release(
         md_lines.append("")
 
     (out_dir / "README.md").write_text("\n".join(md_lines), encoding="utf-8")
+
+    interactive = _build_interactive_export(conn, set_row, official_a, official_b)
+    (out_dir / "interactive.json").write_text(
+        json.dumps(interactive, separators=(",", ":"), ensure_ascii=False),
+        encoding="utf-8",
+    )
     return out_dir
+
+
+_ISO2_COUNTRY_NAMES: dict[str, str] = {
+    "AD": "Andorra", "AL": "Albania", "AT": "Austria", "BA": "Bosnia & Herzegovina",
+    "BE": "Belgium", "BG": "Bulgaria", "BY": "Belarus", "CH": "Switzerland",
+    "CY": "Cyprus", "CZ": "Czechia", "DE": "Germany", "DK": "Denmark",
+    "EE": "Estonia", "ES": "Spain", "FI": "Finland", "FR": "France",
+    "GB": "United Kingdom", "GR": "Greece", "HR": "Croatia", "HU": "Hungary",
+    "IE": "Ireland", "IS": "Iceland", "IT": "Italy", "LI": "Liechtenstein",
+    "LT": "Lithuania", "LU": "Luxembourg", "LV": "Latvia", "MC": "Monaco",
+    "MD": "Moldova", "ME": "Montenegro", "MK": "North Macedonia", "MT": "Malta",
+    "NL": "Netherlands", "NO": "Norway", "PL": "Poland", "PT": "Portugal",
+    "RO": "Romania", "RS": "Serbia", "SE": "Sweden", "SI": "Slovenia",
+    "SK": "Slovakia", "SM": "San Marino", "TR": "Türkiye", "UA": "Ukraine",
+    "VA": "Vatican City", "XK": "Kosovo",
+}
+
+
+def _human_model_name(openrouter_id: str) -> str:
+    slug = openrouter_id.removeprefix("openrouter/").split("/")[-1]
+    special = {
+        "gpt": "GPT",
+        "hy4": "HY4",
+        "pro": "Pro",
+        "flash": "Flash",
+        "mini": "Mini",
+        "nano": "Nano",
+        "sonnet": "Sonnet",
+        "haiku": "Haiku",
+        "opus": "Opus",
+        "gemini": "Gemini",
+        "claude": "Claude",
+        "grok": "Grok",
+        "terra": "Terra",
+        "hydrogen": "Hydrogen",
+        "luna": "Luna",
+    }
+    parts: list[str] = []
+    for tok in slug.split("-"):
+        low = tok.lower()
+        if low in special:
+            parts.append(special[low])
+        elif tok and tok[0].isdigit():
+            if parts and parts[-1] == "GPT":
+                parts[-1] = f"GPT-{tok}"
+            else:
+                parts.append(tok)
+        else:
+            parts.append(tok.capitalize())
+    return " ".join(parts)
+
+
+def _bootstrap_ci(
+    values: list[float],
+    stat_fn: Any,
+    n_boot: int = 2000,
+    seed: int = 42,
+) -> list[float] | None:
+    if len(values) < 2:
+        return None
+    rng = random.Random(seed)
+    n = len(values)
+    draws: list[float] = []
+    for _ in range(n_boot):
+        sample = [values[rng.randrange(n)] for _ in range(n)]
+        draws.append(float(stat_fn(sample)))
+    draws.sort()
+    lo = draws[int(0.025 * (n_boot - 1))]
+    hi = draws[int(0.975 * (n_boot - 1))]
+    return [round(lo, 4), round(hi, 4)]
+
+
+def _percentile(sorted_vals: list[float], p: float) -> float | None:
+    if not sorted_vals:
+        return None
+    idx = (len(sorted_vals) - 1) * p
+    lo = math.floor(idx)
+    hi = math.ceil(idx)
+    if lo == hi:
+        return sorted_vals[lo]
+    frac = idx - lo
+    return sorted_vals[lo] * (1.0 - frac) + sorted_vals[hi] * frac
+
+
+def _build_interactive_export(
+    conn: sqlite3.Connection,
+    set_row: sqlite3.Row,
+    official_a: list[dict[str, Any]],
+    official_b: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build leak-free interactive JSON for public blog visualizations.
+
+    Contains ZERO ground-truth coordinates, ZERO photo UUIDs, ZERO filenames,
+    ZERO place labels, and ZERO commitment salt. Per-sample geometry stores only
+    relative (distance_km, bearing_deg) from an unknown (0, 0) origin; geographic
+    aggregates are strictly country-level ISO-2 summaries.
+    """
+    set_id = str(set_row["id"])
+    photo_rows = [
+        dict(r)
+        for r in conn.execute(
+            """
+            SELECT p.id, p.lat, p.lon, p.country_iso2, p.continent,
+                   p.scene_tag, p.has_landmark, p.has_text, p.near_border
+            FROM set_members sm
+            JOIN photos p ON p.id = sm.photo_id
+            WHERE sm.set_id = ?
+            ORDER BY sm.position ASC
+            """,
+            (set_id,),
+        ).fetchall()
+    ]
+    ordered_items = official_a + official_b
+
+    # Fetch all official results for this set keyed by (track, model_config_id, photo_id)
+    res_rows = [
+        dict(r)
+        for r in conn.execute(
+            """
+            SELECT r.track, r.model_config_id, res.photo_id, res.parse_status,
+                   res.pred_lat, res.pred_lon, res.distance_km, res.tier_points,
+                   res.hit_continent, res.hit_country, res.hit_100km, res.hit_10km,
+                   res.hit_1km, res.hit_100m, res.hit_10m, res.smooth_score,
+                   res.tokens_in, res.tokens_out, res.tokens_reasoning,
+                   res.latency_ms, res.cost_usd
+            FROM results res
+            JOIN runs r ON r.id = res.run_id
+            WHERE r.set_id = ? AND res.is_official = 1
+            ORDER BY r.started_at ASC
+            """,
+            (set_id,),
+        ).fetchall()
+    ]
+
+    by_model_photo: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
+    for row in res_rows:
+        mkey = (str(row["track"]), str(row["model_config_id"]))
+        by_model_photo.setdefault(mkey, {})[str(row["photo_id"])] = row
+
+    models_out: list[dict[str, Any]] = []
+    model_keys: list[tuple[str, tuple[str, str]]] = []
+    for item in ordered_items:
+        r, agg = item["run"], item["agg"]
+        slug_part = str(r["openrouter_id"]).removeprefix("openrouter/").split("/")[-1]
+        eff = r.get("reasoning_effort") or "default"
+        key = f"{slug_part}-{r['track']}-{eff}"
+        mkey = (str(r["track"]), str(r["model_config_id"]))
+        model_keys.append((key, mkey))
+
+        m_rows = list(by_model_photo.get(mkey, {}).values())
+        pts_vals = [float(x["tier_points"]) for x in m_rows]
+        dist_vals = sorted(float(x["distance_km"]) for x in m_rows if x["distance_km"] is not None)
+        fmt_errs = sum(1 for x in m_rows if x["parse_status"] == "format_error")
+
+        strict_ci = _bootstrap_ci(pts_vals, statistics.mean, seed=42)
+        median_ci = _bootstrap_ci(dist_vals, statistics.median, seed=42) if dist_vals else None
+        p90 = _percentile(dist_vals, 0.90)
+
+        models_out.append(
+            {
+                "key": key,
+                "display_name": _human_model_name(str(r["openrouter_id"])),
+                "model_id": r["openrouter_id"],
+                "model_label": r["model_label"],
+                "vendor": r["vendor"],
+                "reasoning_effort": r.get("reasoning_effort"),
+                "track": r["track"],
+                "started_at": r["started_at"],
+                "n": int(agg["count"]),
+                "strict_mean_points": round(float(agg["strict_mean_points"]), 4),
+                "strict_ci95": [round(x, 3) for x in strict_ci] if strict_ci else None,
+                "adjusted_mean_points": round(float(agg["adjusted_mean_points"]), 4),
+                "median_distance_km": round(float(agg["median_distance_km"]), 4)
+                if agg["median_distance_km"] is not None
+                else None,
+                "median_ci95": [round(x, 4) for x in median_ci] if median_ci else None,
+                "mean_distance_km": round(statistics.mean(dist_vals), 3) if dist_vals else None,
+                "p90_distance_km": round(p90, 3) if p90 is not None else None,
+                "max_distance_km": round(dist_vals[-1], 2) if dist_vals else None,
+                "mean_smooth_score": round(float(agg["mean_smooth_score"]), 2),
+                "refusal_rate": round(float(agg["refusal_rate"]), 4),
+                "format_errors": fmt_errs,
+                "tier_rates": {
+                    k.removeprefix("hit_"): round(float(v), 4)
+                    for k, v in agg["tier_rates"].items()
+                },
+                "im2gps_rates": {k: round(float(v), 4) for k, v in agg["im2gps_rates"].items()},
+                "total_cost_usd": round(float(agg["total_cost_usd"]), 4),
+                "mean_latency_s": round(float(agg["mean_latency_s"]), 2),
+                "total_time_s": round(float(agg["total_time_s"]), 1),
+                "mean_tokens_in": int(agg["mean_tokens_in"]),
+                "mean_tokens_out": int(agg["mean_tokens_out"]),
+                "mean_tokens_reasoning": int(agg["mean_tokens_reasoning"]),
+            }
+        )
+
+    # Sort anonymized photos hardest -> easiest by cross-model mean score (zero IDs/coords/country)
+    photo_difficulty: list[tuple[float, float, dict[str, Any]]] = []
+    for p in photo_rows:
+        pid = p["id"]
+        scores = [
+            float(by_model_photo[mkey][pid]["tier_points"])
+            for _, mkey in model_keys
+            if pid in by_model_photo.get(mkey, {})
+        ]
+        dists = [
+            float(by_model_photo[mkey][pid]["distance_km"])
+            for _, mkey in model_keys
+            if pid in by_model_photo.get(mkey, {}) and by_model_photo[mkey][pid]["distance_km"] is not None
+        ]
+        mean_pts = statistics.mean(scores) if scores else 0.0
+        med_d = statistics.median(dists) if dists else 99999.0
+        photo_difficulty.append((mean_pts, -med_d, p))
+    photo_difficulty.sort(key=lambda t: (t[0], t[1]))
+    sorted_photos = [t[2] for t in photo_difficulty]
+
+    photos_out: list[dict[str, Any]] = []
+    for idx, p in enumerate(sorted_photos, 1):
+        pid = p["id"]
+        scores = [
+            float(by_model_photo[mkey][pid]["tier_points"])
+            for _, mkey in model_keys
+            if pid in by_model_photo.get(mkey, {})
+        ]
+        photos_out.append(
+            {
+                "i": idx,
+                "tag": p["scene_tag"],
+                "lm": int(p["has_landmark"]),
+                "txt": int(p["has_text"]),
+                "mean": round(statistics.mean(scores), 2) if scores else 0.0,
+            }
+        )
+
+    # Compact per-model relative samples aligned to sorted_photos: [dist_km, bearing_deg, tier_points]
+    samples_out: dict[str, list[list[float | int | None]]] = {}
+    for key, mkey in model_keys:
+        arr: list[list[float | int | None]] = []
+        pmap = by_model_photo.get(mkey, {})
+        for p in sorted_photos:
+            row = pmap.get(p["id"])
+            if not row:
+                arr.append([None, None, 0])
+                continue
+            dist = row["distance_km"]
+            bearing: int | None = None
+            if dist is not None and row["pred_lat"] is not None and row["pred_lon"] is not None:
+                gt_lat = float(p["lat"])
+                gt_lon = float(p["lon"])
+                dx = (float(row["pred_lon"]) - gt_lon) * 111.32 * max(0.2, math.cos(math.radians(gt_lat)))
+                dy = (float(row["pred_lat"]) - gt_lat) * 111.32
+                # Compass bearing clockwise from North (0=N, 90=E, 180=S, 270=W)
+                deg = math.degrees(math.atan2(dx, dy)) % 360.0
+                bearing = round(deg) % 360
+            arr.append(
+                [
+                    round(float(dist), 4) if dist is not None else None,
+                    bearing,
+                    int(row["tier_points"]),
+                ]
+            )
+        samples_out[key] = arr
+
+    # Country-level aggregates (ISO-2 only, ZERO photo coordinates)
+    by_iso: dict[str, list[str]] = {}
+    for p in photo_rows:
+        iso = str(p["country_iso2"]).upper()
+        by_iso.setdefault(iso, []).append(str(p["id"]))
+
+    countries_out: list[dict[str, Any]] = []
+    for iso, pids in sorted(by_iso.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        all_pts: list[float] = []
+        all_dists: list[float] = []
+        all_ctry = 0
+        all_1km = 0
+        all_100m = 0
+        total_evals = 0
+        per_model: dict[str, dict[str, float | None]] = {}
+
+        for key, mkey in model_keys:
+            pmap = by_model_photo.get(mkey, {})
+            m_pts: list[float] = []
+            m_dists: list[float] = []
+            m_ctry = m_10km = m_1km = m_100m = 0
+            for pid in pids:
+                row = pmap.get(pid)
+                if not row:
+                    continue
+                m_pts.append(float(row["tier_points"]))
+                if row["distance_km"] is not None:
+                    m_dists.append(float(row["distance_km"]))
+                m_ctry += int(row["hit_country"])
+                m_10km += int(row["hit_10km"])
+                m_1km += int(row["hit_1km"])
+                m_100m += int(row["hit_100m"])
+            cnt = len(m_pts)
+            if cnt:
+                per_model[key] = {
+                    "pts": round(statistics.mean(m_pts), 2),
+                    "med_km": round(statistics.median(m_dists), 4) if m_dists else None,
+                    "ctry": round(m_ctry / cnt, 4),
+                    "km10": round(m_10km / cnt, 4),
+                    "km1": round(m_1km / cnt, 4),
+                    "m100": round(m_100m / cnt, 4),
+                }
+                all_pts.extend(m_pts)
+                all_dists.extend(m_dists)
+                all_ctry += m_ctry
+                all_1km += m_1km
+                all_100m += m_100m
+                total_evals += cnt
+
+        countries_out.append(
+            {
+                "iso2": iso,
+                "name": _ISO2_COUNTRY_NAMES.get(iso, iso),
+                "n": len(pids),
+                "mean_points": round(statistics.mean(all_pts), 2) if all_pts else 0.0,
+                "median_km": round(statistics.median(all_dists), 4) if all_dists else None,
+                "hit_country": round(all_ctry / total_evals, 4) if total_evals else 0.0,
+                "hit_1km": round(all_1km / total_evals, 4) if total_evals else 0.0,
+                "hit_100m": round(all_100m / total_evals, 4) if total_evals else 0.0,
+                "by_model": per_model,
+            }
+        )
+
+    # Scene-category aggregates
+    scene_buckets: list[tuple[str, str, list[str]]] = [
+        (
+            "urban_landmark",
+            "Urban (landmark)",
+            [p["id"] for p in photo_rows if p["scene_tag"] == "urban" and int(p["has_landmark"]) == 1],
+        ),
+        (
+            "urban_street",
+            "Urban (non-landmark)",
+            [p["id"] for p in photo_rows if p["scene_tag"] == "urban" and int(p["has_landmark"]) == 0],
+        ),
+        (
+            "rural_nature",
+            "Rural & nature",
+            [p["id"] for p in photo_rows if p["scene_tag"] in ("rural", "nature")],
+        ),
+        (
+            "other",
+            "Landmark / minimal clue",
+            [p["id"] for p in photo_rows if p["scene_tag"] not in ("urban", "rural", "nature")],
+        ),
+    ]
+    scenes_out: list[dict[str, Any]] = []
+    for skey, slabel, pids in scene_buckets:
+        if not pids:
+            continue
+        all_pts_s: list[float] = []
+        all_dists_s: list[float] = []
+        per_model_s: dict[str, dict[str, float | None]] = {}
+        for key, mkey in model_keys:
+            pmap = by_model_photo.get(mkey, {})
+            m_pts = [float(pmap[pid]["tier_points"]) for pid in pids if pid in pmap]
+            m_dists = [
+                float(pmap[pid]["distance_km"])
+                for pid in pids
+                if pid in pmap and pmap[pid]["distance_km"] is not None
+            ]
+            if m_pts:
+                m_100m = sum(int(pmap[pid]["hit_100m"]) for pid in pids if pid in pmap)
+                m_1km = sum(int(pmap[pid]["hit_1km"]) for pid in pids if pid in pmap)
+                per_model_s[key] = {
+                    "pts": round(statistics.mean(m_pts), 2),
+                    "med_km": round(statistics.median(m_dists), 4) if m_dists else None,
+                    "km1": round(m_1km / len(m_pts), 4),
+                    "m100": round(m_100m / len(m_pts), 4),
+                }
+                all_pts_s.extend(m_pts)
+                all_dists_s.extend(m_dists)
+        scenes_out.append(
+            {
+                "key": skey,
+                "label": slabel,
+                "n": len(pids),
+                "mean_points": round(statistics.mean(all_pts_s), 2) if all_pts_s else 0.0,
+                "median_km": round(statistics.median(all_dists_s), 4) if all_dists_s else None,
+                "by_model": per_model_s,
+            }
+        )
+
+    return {
+        "schema": "pinpoint-interactive/1",
+        "meta": {
+            "set_name": set_row["name"],
+            "version": int(set_row["version"]),
+            "set_slug": f"{set_row['name']}-v{set_row['version']}".replace(" ", "-").lower(),
+            "description": set_row["description"],
+            "photo_count": len(photo_rows),
+            "country_count": len(by_iso),
+            "frozen_at": set_row["frozen_at"],
+            "commitment_hash": set_row["commitment_hash"],
+            "redaction_mode": "option_1_bullseye_and_country_agg",
+        },
+        "models": models_out,
+        "countries": countries_out,
+        "scenes": scenes_out,
+        "photos": photos_out,
+        "samples": samples_out,
+    }
 
 
 if __name__ == "__main__":
