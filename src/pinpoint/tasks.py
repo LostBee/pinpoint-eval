@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import os
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 from inspect_ai import Task, task
 from inspect_ai.dataset import MemoryDataset, Sample
 from inspect_ai.model import ChatMessageUser, ContentImage, ContentText
 from inspect_ai.scorer import Score, Target, mean, scorer
 from inspect_ai.solver import Generate, Solver, TaskState, solver, use_tools
-from inspect_ai.tool import web_search
+from inspect_ai.tool import Tool, tool, web_search
+from inspect_ai.util import store
 
 from pinpoint.config import PinpointConfig, get_config
 from pinpoint.db import connect_db, init_db
@@ -75,6 +78,37 @@ def load_set_dataset(cfg: PinpointConfig, set_id: str, track: str) -> MemoryData
     return MemoryDataset(samples=samples, name=f"pinpoint_{set_id}_{track}")
 
 
+@tool(name="web_search")
+def capped_web_search(
+    max_calls: int = 5,
+    max_results: int = 5,
+    inner_search: Any = None,
+) -> Tool:
+    """Web search tool enforcing a strict per-sample invocation cap."""
+
+    async def execute(query: str) -> Any:
+        """Search the web for visual clues such as signage, landmarks, or place names.
+
+        Args:
+            query: Search query text.
+        """
+        s = store()
+        used = int(s.get("pinpoint_search_calls", 0))
+        if used >= max_calls:
+            return (
+                f"Search limit reached ({max_calls} searches max per photo). "
+                "Do not make further searches; return ONLY the final JSON object now."
+            )
+        s.set("pinpoint_search_calls", used + 1)
+        search_fn = inner_search or web_search({"tavily": {"max_results": max_results}})
+        result = search_fn(query)
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+
+    return execute
+
+
 @solver
 def pinpoint_json_solver() -> Solver:
     """Generate an answer and perform at most one logged retry on malformed JSON."""
@@ -82,7 +116,8 @@ def pinpoint_json_solver() -> Solver:
     async def solve(state: TaskState, gen: Generate) -> TaskState:
         state = await gen(state)
         raw = state.output.completion if state.output else ""
-        parsed = parse_model_response(raw)
+        stop_reason = str(getattr(state.output, "stop_reason", "") or "").strip() or None
+        parsed = parse_model_response(raw, stop_reason=stop_reason)
         if parsed.parse_status == "format_error":
             state.messages.append(
                 ChatMessageUser(
@@ -132,7 +167,8 @@ def pinpoint_scorer(data_dir: str | None = None):
     async def score(state: TaskState, target: Target) -> Score:
         gt = json.loads(target.text)
         raw = state.output.completion if state.output else ""
-        parsed = parse_model_response(raw)
+        stop_reason = str(getattr(state.output, "stop_reason", "") or "").strip() or None
+        parsed = parse_model_response(raw, stop_reason=stop_reason)
         breakdown = score_prediction(
             gt_lat=float(gt["lat"]),
             gt_lon=float(gt["lon"]),
@@ -182,10 +218,15 @@ def build_pinpoint_task(set_id: str, track: str, data_dir: str | None = None) ->
         msg_limit = 4
     elif track.upper() == "B":
         solvers = [
-            use_tools(web_search({"tavily": {"max_results": cfg.max_search_calls}})),
+            use_tools(
+                capped_web_search(
+                    max_calls=cfg.max_search_calls,
+                    max_results=cfg.tavily_max_results,
+                )
+            ),
             pinpoint_json_solver(),
         ]
-        msg_limit = 14
+        msg_limit = 24
     else:
         raise ValueError(f"Unsupported track: {track!r}")
 

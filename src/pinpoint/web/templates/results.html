@@ -46,8 +46,8 @@
   <table>
     <thead>
       <tr>
-        <th>#</th><th>Set</th><th>Model</th>
-        <th>Strict (/15)</th><th>Adjusted (/15)</th><th>Refusal</th>
+        <th>#</th><th>Set</th><th>Model</th><th>N</th>
+        <th>Strict (/15) [95% CI]</th><th>Adjusted (/15)</th><th>Refusal</th>
         <th>Median km</th><th>Smooth</th>
         {% if "Track B" in title %}<th>Searches</th>{% endif %}
         <th>Total Time</th><th>Mean Latency</th><th>Cost</th><th>Details</th>
@@ -60,8 +60,15 @@
       <tr>
         <td><strong>{{ loop.index }}</strong></td>
         <td>{{ r.set_name }} v{{ r.set_version }}</td>
-        <td><code>{{ r.model_label }}</code></td>
-        <td><strong>{{ "%.2f"|format(a.strict_mean_points) }}</strong></td>
+        <td>
+          <code>{{ r.model_label }}</code>
+          {% if r.has_mixed_prompts %}<span class="badge badge-warn">mixed prompts</span>{% endif %}
+        </td>
+        <td>{{ a.unique_photos or a.count }}/{{ r.set_photo_count or a.count }}</td>
+        <td>
+          <strong>{{ "%.2f"|format(a.strict_mean_points) }}</strong>
+          {% if a.strict_ci95 %}<span class="muted">[{{ "%.2f"|format(a.strict_ci95[0]) }}, {{ "%.2f"|format(a.strict_ci95[1]) }}]</span>{% endif %}
+        </td>
         <td>{{ "%.2f"|format(a.adjusted_mean_points) }}</td>
         <td>{{ "%.0f%%"|format(a.refusal_rate * 100) }}</td>
         <td>{{ "%.3f"|format(a.median_distance_km) if a.median_distance_km is not none else "—" }}</td>
@@ -152,6 +159,30 @@
   {% endif %}
 </div>
 {% endfor %}
+
+{% if incomplete_runs %}
+<div class="card">
+  <h3>Incomplete / In-Progress Official Runs (Excluded from Official Leaderboard)</h3>
+  <p class="muted">Runs below have not yet completed every photo in their frozen set and are excluded from official rankings.</p>
+  <table>
+    <thead><tr><th>Set</th><th>Track</th><th>Model</th><th>Progress</th><th>Strict (/15)</th><th>Details</th></tr></thead>
+    <tbody>
+      {% for item in incomplete_runs %}
+      {% set r = item.run %}
+      {% set a = item.agg %}
+      <tr>
+        <td>{{ r.set_name }} v{{ r.set_version }}</td>
+        <td>{{ r.track }}</td>
+        <td><code>{{ r.model_label }}</code></td>
+        <td><span class="badge badge-warn">{{ a.unique_photos or a.count }} / {{ r.set_photo_count }}</span></td>
+        <td>{{ "%.2f"|format(a.strict_mean_points) }}</td>
+        <td><a href="/results/official/{{ r.set_id }}/{{ r.track }}/{{ r.model_config_id }}" style="color:#93c5fd;">Inspect</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
 
 {% if bullseye_svg %}
 <div class="card">

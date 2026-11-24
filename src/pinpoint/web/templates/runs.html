@@ -54,6 +54,13 @@
     <input type="hidden" name="set_id" value="{{ selected_set }}" />
     <input type="hidden" name="track" value="{{ selected_track }}" />
     <input type="hidden" name="model_config_id" value="{{ selected_model }}" />
+    <label>Epochs
+      <select name="epochs">
+        <option value="1" selected>1 (standard)</option>
+        <option value="3">3 (variance)</option>
+        <option value="5">5 (Epoch error bars)</option>
+      </select>
+    </label>
     {% if guard and guard.blocked %}
     <input type="text" name="override_reason" placeholder="Override reason required" required style="width:280px;" />
     {% endif %}

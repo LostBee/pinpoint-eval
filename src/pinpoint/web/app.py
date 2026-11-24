@@ -32,7 +32,7 @@ from pinpoint.geo import (
     european_country_choices,
     normalize_country,
 )
-from pinpoint.importer import collect_official_leaderboard
+from pinpoint.importer import collect_incomplete_official_runs, collect_official_leaderboard
 from pinpoint.ingest import SUPPORTED_EXTENSIONS, ingest_photo, list_inbox_files, read_exif_metadata
 from pinpoint.runner import (
     SequentialJobWorker,
@@ -143,6 +143,7 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
         country: str = Form(...),
         place_label: str = Form(""),
         scene_tag: str = Form("urban"),
+        coord_basis: str = Form("camera"),
         near_border: str | None = Form(None),
         has_text: str | None = Form(None),
         has_landmark: str | None = Form(None),
@@ -164,6 +165,7 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
                 near_border=near_border is not None,
                 has_text=has_text is not None,
                 has_landmark=has_landmark is not None,
+                coord_basis=coord_basis,
             )
             return RedirectResponse(url=f"/?msg=Ingested+{pid[:8]}", status_code=303)
         except (ValueError, RuntimeError, OSError, sqlite3.Error) as exc:
@@ -562,6 +564,7 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
         set_id: str = Form(...),
         track: str = Form("A"),
         model_config_id: str = Form(...),
+        epochs: int = Form(1),
         override_reason: str = Form(""),
     ):
         conn = _db()
@@ -572,6 +575,7 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
                 track=track,
                 model_config_id=model_config_id,
                 override_reason=override_reason or None,
+                epochs=epochs,
             )
             return RedirectResponse(url=f"/runs?msg=Queued+job+{job_id[:8]}", status_code=303)
         except (ValueError, RuntimeError, sqlite3.Error) as exc:
@@ -697,6 +701,9 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
             official_a, official_b = collect_official_leaderboard(
                 conn, set_id=selected_set or None
             )
+            incomplete_runs = collect_incomplete_official_runs(
+                conn, set_id=selected_set or None
+            )
             history_runs.reverse()
 
             map_where = "WHERE res.is_official = 1" + (" AND r.set_id = ?" if where_set else "")
@@ -733,6 +740,7 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
                 "selected_set": selected_set,
                 "track_a": official_a,
                 "track_b": official_b,
+                "incomplete_runs": incomplete_runs,
                 "history_runs": history_runs,
                 "ranking_svg": ranking_svg,
                 "map_svg": map_svg,

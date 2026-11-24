@@ -122,4 +122,19 @@ def test_ensure_inspect_model_cost_registers_unknown_model():
     cost = ensure_inspect_model_cost(name, "anthropic", '{"est_usd_per_1m_in": 1.0, "est_usd_per_1m_out": 5.0}')
     assert cost.input == 1.0 and cost.output == 5.0
     info = get_model_info(name)
-    assert info is not None and info.cost is not None and info.cost.input == 1.0
+    assert info is not None and info.cost is not None and info.cost.input == 1.0 and info.output_tokens == 32768
+
+
+def test_no_clue_photos_blocked_from_official_sets(tmp_path: Path):
+    cfg = PinpointConfig(data_dir=tmp_path / "data")
+    cfg.ensure_dirs()
+    conn = connect_db(cfg.db_path)
+    init_db(conn)
+
+    img_path = cfg.inbox_dir / "PXL_noclue.jpg"
+    Image.new("RGB", (320, 240), color=(100, 100, 100)).save(img_path, format="JPEG")
+    pid = ingest_photo(conn, cfg, img_path, lat=49.6116, lon=6.1319, country_input="LU", scene_tag="no_clue")
+    set_id = create_image_set(conn, name="europe", version=1)
+    with pytest.raises(ValueError, match="no_clue"):
+        add_photos_to_set(conn, set_id, [pid])
+    conn.close()

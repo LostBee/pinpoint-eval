@@ -13,7 +13,7 @@ from PIL import ExifTags, Image, ImageOps
 
 from pinpoint.config import PinpointConfig
 from pinpoint.db import utc_now
-from pinpoint.geo import continent_for_location, normalize_country
+from pinpoint.geo import continent_for_location, normalize_country, validate_coord_country
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
@@ -161,6 +161,8 @@ def ingest_photo(
     near_border: bool = False,
     has_text: bool = False,
     has_landmark: bool = False,
+    coord_basis: str = "camera",
+    validate_country_bounds: bool = True,
     status: str = "pool",
     exclude_reason: str | None = None,
 ) -> str:
@@ -168,6 +170,12 @@ def ingest_photo(
     iso2 = normalize_country(country_input)
     if not iso2:
         raise ValueError(f"Unrecognized country: {country_input!r}")
+    if validate_country_bounds:
+        ok_bounds, bounds_err = validate_coord_country(lat, lon, iso2)
+        if not ok_bounds:
+            raise ValueError(bounds_err or "Coordinates outside country bounds")
+    if coord_basis not in ("camera", "subject"):
+        raise ValueError(f"Unsupported coord_basis: {coord_basis!r} (expected 'camera' or 'subject')")
     continent = continent_for_location(iso2, lat, lon) or "OTHER"
 
     meta = read_exif_metadata(inbox_file)
@@ -197,9 +205,9 @@ def ingest_photo(
         INSERT INTO photos (
             id, sha256_sanitized, phash, lat, lon, gps_accuracy_m,
             country_iso2, continent, place_label, scene_tag,
-            near_border, has_text, has_landmark, status, exclude_reason,
+            near_border, has_text, has_landmark, coord_basis, status, exclude_reason,
             taken_date, camera_model, vault_filename, added_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             photo_id,
@@ -215,6 +223,7 @@ def ingest_photo(
             1 if near_border else 0,
             1 if has_text else 0,
             1 if has_landmark else 0,
+            coord_basis,
             status,
             exclude_reason,
             meta.taken_date,

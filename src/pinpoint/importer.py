@@ -27,6 +27,20 @@ def _count_tool_calls(sample: Any) -> int:
     return count
 
 
+def _extract_upstream_provider(sample: Any) -> str | None:
+    """Read upstream provider name reported by OpenRouter in response metadata if present."""
+    for ev in reversed(getattr(sample, "events", None) or []):
+        if getattr(ev, "event", None) != "model":
+            continue
+        call = getattr(ev, "call", None)
+        resp = getattr(call, "response", None) if call else None
+        if isinstance(resp, dict):
+            prov = resp.get("provider")
+            if prov:
+                return str(prov).strip()
+    return None
+
+
 def _provider_reported_cost(sample: Any) -> float | None:
     """Read exact upstream USD cost returned in OpenRouter response.usage.cost if present."""
     reported = 0.0
@@ -99,6 +113,8 @@ def import_eval_log(
     override_reason: str | None = None,
     skip_sample_errors: bool = False,
     run_status_override: str | None = None,
+    scorer_version: str = "v1",
+    harness_manifest_json: str | None = None,
 ) -> int:
     """Import samples from an Inspect .eval log into runs & results (idempotent per run_id)."""
     log: EvalLog = read_eval_log(str(log_path))
@@ -115,9 +131,10 @@ def import_eval_log(
         """
         INSERT OR REPLACE INTO runs (
             id, set_id, track, model_config_id, prompt_version_id,
+            scorer_version, harness_manifest_json,
             inspect_log_path, epochs, status, cost_usd, git_commit,
             started_at, finished_at, override_reason
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             run_id,
@@ -125,6 +142,8 @@ def import_eval_log(
             track.upper(),
             model_config_id,
             prompt_version_id,
+            scorer_version,
+            harness_manifest_json,
             str(log_path),
             int(getattr(log.eval.config, "epochs", None) or 1),
             run_status,
@@ -150,7 +169,11 @@ def import_eval_log(
         if not photo_row:
             continue
 
-        raw_text = sample.output.completion if getattr(sample, "output", None) else ""
+        output_obj = getattr(sample, "output", None)
+        raw_text = output_obj.completion if output_obj else ""
+        stop_reason = str(getattr(output_obj, "stop_reason", "") or "").strip() or None
+        upstream_provider = _extract_upstream_provider(sample)
+
         if getattr(sample, "error", None) is not None and not raw_text:
             if skip_sample_errors:
                 continue
@@ -158,7 +181,7 @@ def import_eval_log(
             pred = None
             breakdown = score_prediction(0, 0, "", "", parse_model_response(""))
         else:
-            pred = parse_model_response(raw_text)
+            pred = parse_model_response(raw_text, stop_reason=stop_reason)
             parse_status = pred.parse_status
             breakdown = score_prediction(
                 gt_lat=float(photo_row["lat"]),
@@ -176,35 +199,52 @@ def import_eval_log(
         latency_ms = int((getattr(sample, "total_time", 0.0) or 0.0) * 1000)
         epoch = int(getattr(sample, "epoch", 1) or 1)
 
-        # Official result rule (Q15): first recorded result for (set, track, model, photo, epoch=1)
-        existing_official = conn.execute(
-            """
-            SELECT res.id
-            FROM results res
-            JOIN runs r ON r.id = res.run_id
-            WHERE r.set_id = ?
-              AND r.track = ?
-              AND r.model_config_id = ?
-              AND res.photo_id = ?
-              AND res.is_official = 1
-              AND res.run_id != ?
-            LIMIT 1
-            """,
-            (set_id, track.upper(), model_config_id, photo_id, run_id),
-        ).fetchone()
-        is_official = 1 if (epoch == 1 and existing_official is None) else 0
+        if parse_status == "api_error":
+            is_official = 0
+        else:
+            # Official result rule: first valid (non-api_error) recorded result per (set, track, model, photo, epoch)
+            existing_official = conn.execute(
+                """
+                SELECT res.id
+                FROM results res
+                JOIN runs r ON r.id = res.run_id
+                WHERE r.set_id = ?
+                  AND r.track = ?
+                  AND r.model_config_id = ?
+                  AND res.photo_id = ?
+                  AND res.epoch = ?
+                  AND res.is_official = 1
+                  AND res.parse_status != 'api_error'
+                  AND res.run_id != ?
+                LIMIT 1
+                """,
+                (set_id, track.upper(), model_config_id, photo_id, epoch, run_id),
+            ).fetchone()
+            is_official = 1 if existing_official is None else 0
+            if is_official == 1:
+                conn.execute(
+                    """
+                    UPDATE results SET is_official = 0
+                    WHERE photo_id = ? AND epoch = ? AND parse_status = 'api_error' AND is_official = 1
+                      AND run_id IN (
+                          SELECT id FROM runs WHERE set_id = ? AND track = ? AND model_config_id = ?
+                      )
+                    """,
+                    (photo_id, epoch, set_id, track.upper(), model_config_id),
+                )
 
         conn.execute(
             """
             INSERT INTO results (
                 id, run_id, photo_id, epoch, attempt, is_official,
-                raw_response, parse_status, pred_lat, pred_lon, pred_country_iso2,
+                raw_response, parse_status, stop_reason, upstream_provider,
+                pred_lat, pred_lon, pred_country_iso2,
                 pred_confidence, reasoning_text, tool_calls_count,
                 tokens_in, tokens_out, tokens_reasoning, tokens_cached,
                 latency_ms, cost_usd, distance_km,
                 hit_continent, hit_country, hit_100km, hit_10km, hit_1km,
                 hit_100m, hit_10m, tier_points, smooth_score
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(uuid.uuid4()),
@@ -215,6 +255,8 @@ def import_eval_log(
                 is_official,
                 raw_text,
                 parse_status,
+                stop_reason,
+                upstream_provider,
                 pred.lat if pred else None,
                 pred.lon if pred else None,
                 pred.country_iso2 if pred else None,
@@ -249,7 +291,8 @@ def import_eval_log(
 def backfill_runs_from_eval_logs(conn: sqlite3.Connection) -> int:
     """Re-import all runs whose .eval log file still exists on disk (e.g. after schema upgrades)."""
     runs = conn.execute(
-        "SELECT id, set_id, track, model_config_id, prompt_version_id, inspect_log_path, git_commit, override_reason "
+        "SELECT id, set_id, track, model_config_id, prompt_version_id, scorer_version, "
+        "harness_manifest_json, inspect_log_path, git_commit, override_reason "
         "FROM runs WHERE inspect_log_path IS NOT NULL ORDER BY started_at ASC"
     ).fetchall()
     updated = 0
@@ -267,6 +310,8 @@ def backfill_runs_from_eval_logs(conn: sqlite3.Connection) -> int:
             prompt_version_id=r["prompt_version_id"],
             git_commit=r["git_commit"],
             override_reason=r["override_reason"],
+            scorer_version=r["scorer_version"] or "v1",
+            harness_manifest_json=r["harness_manifest_json"],
         )
         updated += 1
     return updated
@@ -345,10 +390,18 @@ def recover_partial_eval_logs(
 def collect_official_leaderboard(
     conn: sqlite3.Connection,
     set_id: str | None = None,
+    include_incomplete: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Aggregate Official (is_official=1) metrics per (set_id, track, model_config_id),
-    seamlessly merging samples across resumed partial runs."""
-    where_clause = "WHERE res.is_official = 1"
+    seamlessly merging samples across resumed partial runs and isolating incomplete sets."""
+    set_photo_counts = {
+        str(r["set_id"]): int(r["cnt"])
+        for r in conn.execute(
+            "SELECT set_id, COUNT(*) AS cnt FROM set_members GROUP BY set_id"
+        ).fetchall()
+    }
+
+    where_clause = "WHERE res.is_official = 1 AND res.parse_status != 'api_error'"
     params: tuple = ()
     if set_id and set_id != "all":
         where_clause += " AND r.set_id = ?"
@@ -357,6 +410,7 @@ def collect_official_leaderboard(
     rows = conn.execute(
         f"""
         SELECT r.set_id, r.track, r.model_config_id, r.id AS run_id, r.started_at,
+               r.prompt_version_id, r.scorer_version,
                s.name AS set_name, s.version AS set_version,
                mc.vendor, mc.family, mc.openrouter_id, mc.reasoning_effort,
                res.*
@@ -402,6 +456,31 @@ def collect_official_leaderboard(
     for bucket in grouped.values():
         agg = aggregate_run_metrics(bucket["rows"])
         agg["total_searches"] = sum(int(x.get("tool_calls_count") or 0) for x in bucket["rows"])
+        set_cnt = set_photo_counts.get(bucket["run"]["set_id"], 0)
+        uniq_cnt = int(agg.get("unique_photos") or 0)
+        is_complete = set_cnt > 0 and uniq_cnt >= set_cnt
+        prompt_versions = sorted(
+            {str(x["prompt_version_id"]) for x in bucket["rows"] if x.get("prompt_version_id")}
+        )
+        scorer_versions = sorted(
+            {str(x["scorer_version"]) for x in bucket["rows"] if x.get("scorer_version")}
+        )
+        upstream_providers = sorted(
+            {str(x["upstream_provider"]) for x in bucket["rows"] if x.get("upstream_provider")}
+        )
+
+        bucket["run"]["set_photo_count"] = set_cnt
+        bucket["run"]["is_complete"] = is_complete
+        bucket["run"]["prompt_versions"] = prompt_versions
+        bucket["run"]["has_mixed_prompts"] = len(prompt_versions) > 1
+        bucket["run"]["scorer_versions"] = scorer_versions
+        bucket["run"]["upstream_providers"] = upstream_providers
+        agg["set_photo_count"] = set_cnt
+        agg["is_complete"] = is_complete
+
+        if not include_incomplete and not is_complete:
+            continue
+
         item = {"run": bucket["run"], "agg": agg}
         if bucket["run"]["track"] == "A":
             official_a.append(item)
@@ -415,3 +494,12 @@ def collect_official_leaderboard(
     official_a.sort(key=sort_key)
     official_b.sort(key=sort_key)
     return official_a, official_b
+
+
+def collect_incomplete_official_runs(
+    conn: sqlite3.Connection,
+    set_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return official run buckets that have not yet evaluated every photo in their set."""
+    all_a, all_b = collect_official_leaderboard(conn, set_id=set_id, include_incomplete=True)
+    return [item for item in (all_a + all_b) if not item["agg"].get("is_complete")]

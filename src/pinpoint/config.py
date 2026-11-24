@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 REPO_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(REPO_ROOT / ".env")
 
+SCORER_VERSION = "v2"
+
 TIER_WEIGHTS: dict[str, int] = {
     "continent": 1,
     "country": 2,
@@ -51,6 +53,16 @@ def format_model_label(openrouter_id: str, reasoning_effort: str | None = None) 
     return f"{base} [{reasoning_effort}]" if reasoning_effort else base
 
 
+def _parse_optional_cost(raw: str | None) -> float | None:
+    if raw is None:
+        return None
+    cleaned = raw.strip().lower()
+    if cleaned in ("", "none", "null", "0", "0.0"):
+        return None
+    val = float(cleaned)
+    return val if val > 0 else None
+
+
 @dataclass(frozen=True)
 class PinpointConfig:
     repo_root: Path = REPO_ROOT
@@ -62,8 +74,13 @@ class PinpointConfig:
     max_long_edge: int = 1536
     jpeg_quality: int = 85
     max_search_calls: int = 5
-    max_run_cost_usd: float = field(
-        default_factory=lambda: float(os.getenv("PINPOINT_MAX_RUN_COST_USD") or "5.00")
+    tavily_max_results: int = 5
+    default_temperature: float = 0.0
+    default_max_tokens: int = 16384
+    default_timeout_s: int = 180
+    default_epochs: int = 1
+    max_run_cost_usd: float | None = field(
+        default_factory=lambda: _parse_optional_cost(os.getenv("PINPOINT_MAX_RUN_COST_USD"))
     )
 
     @property

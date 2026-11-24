@@ -116,9 +116,23 @@ Publish the commitment hash *before* running models so nobody can claim photo se
 
 ---
 
+## Step 7 — Reviewability, Human Baseline & Temporal Controls
+
+1. **Public Representative Sample Split (Section 1 Reviewability):** Maintain a small public calibration split (`25–30` non-active/retired photos with sanitized JPEGs, ground truth, and sample `.eval` logs) so independent reviewers can verify the scorer without NDA access. For full active-set review under NDA, export via:
+   ```powershell
+   .\.venv\Scripts\pinpoint.exe export-audit --set-id <set-id>
+   .\.venv\Scripts\pinpoint.exe verify-commitment <audit-dir>
+   ```
+2. **Human Completability Baseline (Section 3):** Before locking final comparisons, evaluate `1–2` human evaluators (e.g., an experienced geolocator and a general baseline) on a stratified `50`-photo subset to confirm human solvability and anchor a reference ceiling.
+3. **Provenance & Reverse-Image-Search Audit:** Confirm all active photos are original, never-published captures and spot-check a stratified sample with reverse image search so exposure can be documented as `0% tasks public, 0% solutions public`.
+4. **Track A vs. Track B Temporal Policy:** Treat **Track A (`Pixels Only`)** as the primary Epoch-auditable benchmark. For **Track B (`Web Search`)**, run all compared models within a tight synchronized date window (and archive `.eval` tool transcripts) to prevent live web-search index drift from invalidating cross-model comparisons.
+
+---
+
 ## Revision Log
 
 | Date | Update |
 |---|---|
 | 2026-11-16 | Initial Phase 1 runbook (`200` photos, `> 10` countries, OpenRouter `reasoning.effort` sweeps, Option-1 public exports). |
 | 2026-11-17 | Clarified rotation policy: multiple existing models & thinking levels per vendor allowed on active sets (`europe v1`) without overwriting prior results; retire set & rotate to `v2` only for future model releases. Added latency/token/OpenRouter cost telemetry. |
+| 2026-11-24 | Hardened against Epoch AI Rubric v1: `pinpoint_v2` camera-location prompt, enforced Track B 5-call cap, `api_error`/truncation separation, complete-only official leaderboard, NDA `export-audit` + `verify-commitment`, bootstrap 95% CIs, naive baseline floor, and Step 7 reviewability/human-baseline/provenance controls. |

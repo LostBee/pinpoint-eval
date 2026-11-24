@@ -29,12 +29,21 @@
       {% if item.meta.lat is not none and item.meta.lon is not none %}
         · {{ map_links(item.meta.lat, item.meta.lon) }}
       {% endif %}
+      {% if item.meta.gps_accuracy_m is not none and item.meta.gps_accuracy_m > 25 %}
+        <span class="badge badge-warn">GPS ±{{ "%.0f"|format(item.meta.gps_accuracy_m) }} m</span>
+      {% endif %}
     </div>
     <form action="/inbox/ingest" method="post" style="margin-top:10px;">
       <input type="hidden" name="filename" value="{{ item.filename }}" />
       <div class="row">
         <label>Lat <input type="number" step="any" name="lat" value="{{ item.meta.lat or '' }}" required style="width:110px;" /></label>
         <label>Lon <input type="number" step="any" name="lon" value="{{ item.meta.lon or '' }}" required style="width:110px;" /></label>
+        <label>Basis
+          <select name="coord_basis">
+            <option value="camera" selected>camera</option>
+            <option value="subject">subject</option>
+          </select>
+        </label>
       </div>
       <div class="row">
         <label>Country <input type="text" name="country" list="eu-countries" placeholder="LU, IT, DE..." required style="width:120px;" /></label>

@@ -33,12 +33,26 @@ def add_photos_to_set(
     conn: sqlite3.Connection,
     set_id: str,
     photo_ids: list[str],
+    allow_no_clue: bool = False,
 ) -> int:
     row = conn.execute("SELECT frozen_at FROM image_sets WHERE id = ?", (set_id,)).fetchone()
     if not row:
         raise ValueError(f"Unknown set_id: {set_id}")
     if row["frozen_at"] is not None:
         raise RuntimeError("Cannot modify a frozen image set; create a new version instead.")
+
+    if not allow_no_clue and photo_ids:
+        placeholders = ",".join("?" for _ in photo_ids)
+        bad = conn.execute(
+            f"SELECT id FROM photos WHERE id IN ({placeholders}) AND scene_tag = 'no_clue'",
+            tuple(photo_ids),
+        ).fetchall()
+        if bad:
+            bad_ids = ", ".join(r["id"][:8] for r in bad[:5])
+            raise ValueError(
+                f"Cannot add 'no_clue' photos ({bad_ids}) to an official benchmark set; "
+                f"unsolvable items risk failing Epoch's impossible-task check."
+            )
 
     max_pos_row = conn.execute(
         "SELECT COALESCE(MAX(position), 0) AS m FROM set_members WHERE set_id = ?",

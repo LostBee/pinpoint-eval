@@ -2,11 +2,14 @@
 
 from pinpoint.geo import (
     aggregate_run_metrics,
+    bootstrap_ci,
+    compute_naive_baseline,
     continent_for_location,
     geodesic_distance_km,
     normalize_country,
     parse_model_response,
     score_prediction,
+    validate_coord_country,
 )
 
 
@@ -32,8 +35,13 @@ def test_turkiye_europe_vs_asia_rule():
     assert continent_for_location("TR", 39.93, 32.85) == "AS"
     # Luxembourg
     assert continent_for_location("LU", 49.61, 6.13) == "EU"
-    # Japan
-    assert continent_for_location("JP", 35.68, 139.76) == "OTHER"
+    # Global continents
+    assert continent_for_location("JP", 35.68, 139.76) == "AS"
+    assert continent_for_location("US", 40.71, -74.00) == "NA"
+    assert continent_for_location("BR", -23.55, -46.63) == "SA"
+    assert continent_for_location("AU", -33.86, 151.20) == "OC"
+    assert continent_for_location("EG", 30.04, 31.23) == "AF"
+    assert continent_for_location("AQ", -75.0, 0.0) == "AN"
 
 
 def test_exact_hit_scores_max_15():
@@ -93,3 +101,35 @@ def test_strict_vs_adjusted_aggregation():
     assert agg["strict_mean_points"] == 7.5
     assert agg["adjusted_mean_points"] == 15.0
     assert agg["refusal_rate"] == 0.5
+
+
+def test_hardened_json_truncation_country_bounds_and_baselines():
+    # Parenthetical country normalized; fuzzy garbage rejected
+    assert normalize_country("France (Paris)") == "FR"
+    assert normalize_country("Somewhere near Northlandia") is None
+
+    # Stray braces outside JSON don't break raw_decode extraction
+    noisy = parse_model_response(
+        'Thinking {note: ignore me} -> {"status":"ok","country":"FR","latitude":48.8566,"longitude":2.3522,"confidence":0.8,"reasoning":"Eiffel"}'
+    )
+    assert noisy.parse_status == "ok" and noisy.country_iso2 == "FR"
+
+    # max_tokens cutoff separated from format_error
+    trunc = parse_model_response('{"status":"ok","country":"DE"', stop_reason="max_tokens")
+    assert trunc.parse_status == "truncated"
+
+    # Country bounding-box check catches swapped coordinates
+    assert validate_coord_country(48.8566, 2.3522, "FR")[0] is True
+    assert validate_coord_country(2.3522, 48.8566, "FR")[0] is False
+
+    # Bootstrap CI and naive baseline
+    ci = bootstrap_ci([1.0, 5.0, 10.0, 15.0])
+    assert ci is not None and ci[0] <= ci[1]
+    base = compute_naive_baseline(
+        [
+            {"id": "1", "lat": 50.0, "lon": 10.0, "country_iso2": "DE", "continent": "EU"},
+            {"id": "2", "lat": 48.8566, "lon": 2.3522, "country_iso2": "FR", "continent": "EU"},
+        ]
+    )
+    assert base["photo_count"] == 2
+    assert base["strict_mean_points"] > 0

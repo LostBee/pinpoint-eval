@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+from pathlib import Path
 
 import uvicorn
 
@@ -11,7 +13,12 @@ from pinpoint.config import get_config
 from pinpoint.db import connect_db, init_db
 from pinpoint.importer import backfill_runs_from_eval_logs
 from pinpoint.ingest import verify_sanitized_image
-from pinpoint.runner import export_public_release, export_summary_files
+from pinpoint.runner import (
+    export_audit_bundle,
+    export_public_release,
+    export_summary_files,
+    verify_audit_commitment,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,6 +39,17 @@ def main(argv: list[str] | None = None) -> int:
         help="Export leak-free Option-1 results bundle (commitment, summary, bullseye) to results/",
     )
     pub_p.add_argument("--set-id", default=None, help="Optional image_set UUID (defaults to latest frozen set)")
+    audit_p = sub.add_parser(
+        "export-audit",
+        help="Export confidential NDA auditor bundle (images, ground truth, salt, .eval logs)",
+    )
+    audit_p.add_argument("--set-id", default=None, help="Optional image_set UUID (defaults to latest frozen set)")
+    audit_p.add_argument("--out", default=None, help="Optional output directory path")
+    ver_p = sub.add_parser(
+        "verify-commitment",
+        help="Verify image SHA-256s and commitment_hash from an exported audit bundle",
+    )
+    ver_p.add_argument("audit_dir", help="Path to audit bundle directory containing audit_manifest.json")
     sub.add_parser("backfill-logs", help="Re-import existing .eval logs to update tokens, reasoning, latency, and cost")
 
     args = parser.parse_args(argv)
@@ -62,6 +80,23 @@ def main(argv: list[str] | None = None) -> int:
         out_dir = export_public_release(conn, cfg, set_id=args.set_id)
         print(f"Exported safe public bundle to:\n  {out_dir}")
         conn.close()
+        return 0
+
+    if args.command == "export-audit":
+        out_dir = export_audit_bundle(
+            conn,
+            cfg,
+            set_id=args.set_id,
+            out_dir=Path(args.out).resolve() if args.out else None,
+        )
+        print(f"Exported confidential audit bundle to:\n  {out_dir}")
+        conn.close()
+        return 0
+
+    if args.command == "verify-commitment":
+        conn.close()
+        res = verify_audit_commitment(Path(args.audit_dir).resolve())
+        print(json.dumps(res, indent=2))
         return 0
 
     if args.command == "backfill-logs":

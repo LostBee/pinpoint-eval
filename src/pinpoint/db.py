@@ -8,7 +8,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from pinpoint.prompts import PROMPT_V1_ID, build_prompt, prompt_hash, schema_json
+from pinpoint.prompts import (
+    PROMPT_V1_ID,
+    PROMPT_V2_A_ID,
+    PROMPT_V2_B_ID,
+    build_prompt,
+    prompt_hash,
+    schema_json,
+)
 
 SCHEMA_SQL = """
 PRAGMA foreign_keys = ON;
@@ -204,15 +211,39 @@ def init_db(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE results ADD COLUMN tokens_reasoning INTEGER NOT NULL DEFAULT 0")
     if "tokens_cached" not in res_cols:
         conn.execute("ALTER TABLE results ADD COLUMN tokens_cached INTEGER NOT NULL DEFAULT 0")
+    if "stop_reason" not in res_cols:
+        conn.execute("ALTER TABLE results ADD COLUMN stop_reason TEXT")
+    if "upstream_provider" not in res_cols:
+        conn.execute("ALTER TABLE results ADD COLUMN upstream_provider TEXT")
+
+    photo_cols = {r["name"] for r in conn.execute("PRAGMA table_info(photos)").fetchall()}
+    if "coord_basis" not in photo_cols:
+        conn.execute("ALTER TABLE photos ADD COLUMN coord_basis TEXT NOT NULL DEFAULT 'camera'")
+
+    run_cols = {r["name"] for r in conn.execute("PRAGMA table_info(runs)").fetchall()}
+    if "scorer_version" not in run_cols:
+        conn.execute("ALTER TABLE runs ADD COLUMN scorer_version TEXT NOT NULL DEFAULT 'v1'")
+    if "harness_manifest_json" not in run_cols:
+        conn.execute("ALTER TABLE runs ADD COLUMN harness_manifest_json TEXT")
 
     prompt_a = build_prompt("A")
+    prompt_b = build_prompt("B")
+    now = utc_now()
     conn.execute(
         """
         INSERT OR IGNORE INTO prompt_versions (id, sha256, template_text, schema_json, created_at)
         VALUES (?, ?, ?, ?, ?)
         """,
-        (PROMPT_V1_ID, prompt_hash(prompt_a), prompt_a, schema_json(), utc_now()),
+        (PROMPT_V1_ID, prompt_hash(prompt_a), prompt_a, schema_json(), now),
     )
+    for pid, ptext in ((PROMPT_V2_A_ID, prompt_a), (PROMPT_V2_B_ID, prompt_b)):
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO prompt_versions (id, sha256, template_text, schema_json, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (pid, prompt_hash(ptext), ptext, schema_json(), now),
+        )
 
     seeded = conn.execute("SELECT value FROM app_meta WHERE key = 'seeded_models'").fetchone()
     existing_models = conn.execute("SELECT COUNT(*) AS c FROM model_configs").fetchone()["c"]
