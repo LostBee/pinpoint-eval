@@ -552,3 +552,48 @@ def test_capped_web_search_and_api_error_recovery_and_incomplete_isolation(tmp_p
     assert ep_entry["agg"]["epochs_count"] == 2
     assert ep_entry["agg"]["count"] == 4
     conn.close()
+
+
+def test_frozen_photo_metadata_tags_editable_without_changing_commitment(tmp_path: Path):
+    from pinpoint.sets import compute_commitment_hash
+
+    cfg = PinpointConfig(repo_root=tmp_path / "repo", data_dir=tmp_path / "data")
+    cfg.ensure_dirs()
+    conn = connect_db(cfg.db_path)
+    init_db(conn)
+    p = cfg.inbox_dir / "PXL_tag.jpg"
+    Image.new("RGB", (320, 240), color=(30, 60, 90)).save(p, format="JPEG")
+    pid = ingest_photo(conn, cfg, p, lat=49.6116, lon=6.1319, country_input="LU", scene_tag="urban")
+    set_id = create_image_set(conn, name="europe", version=1)
+    add_photos_to_set(conn, set_id, [pid])
+    orig_hash = freeze_set(conn, set_id)
+    salt = conn.execute("SELECT commitment_salt FROM image_sets WHERE id = ?", (set_id,)).fetchone()["commitment_salt"]
+    conn.close()
+
+    app = create_app(cfg=cfg, start_worker=False)
+    with TestClient(app) as client:
+        assert '<option value="landmark">' not in client.get("/").text
+        pool_html = client.get("/pool").text
+        assert '<option value="landmark">' not in pool_html
+
+        resp = client.post(
+            "/pool/update",
+            data={
+                "photo_id": pid,
+                "lat": "10.0",
+                "lon": "10.0",
+                "country": "DE",
+                "place_label": "Sintra wall",
+                "scene_tag": "rural",
+                "has_landmark": "on",
+            },
+        )
+        assert resp.status_code == 200
+
+    conn2 = connect_db(cfg.db_path)
+    row = conn2.execute("SELECT * FROM photos WHERE id = ?", (pid,)).fetchone()
+    # Ground truth stayed locked, metadata tags updated, commitment hash unchanged
+    assert row["lat"] == 49.6116 and row["lon"] == 6.1319 and row["country_iso2"] == "LU"
+    assert row["scene_tag"] == "rural" and row["has_landmark"] == 1 and row["place_label"] == "Sintra wall"
+    assert compute_commitment_hash(conn2, set_id, salt) == orig_hash
+    conn2.close()

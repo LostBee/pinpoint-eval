@@ -243,9 +243,9 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
     @app.post("/pool/update")
     def pool_update(
         photo_id: str = Form(...),
-        lat: float = Form(...),
-        lon: float = Form(...),
-        country: str = Form(...),
+        lat: float | None = Form(None),
+        lon: float | None = Form(None),
+        country: str | None = Form(None),
         place_label: str = Form(""),
         scene_tag: str = Form("urban"),
         near_border: str | None = Form(None),
@@ -254,6 +254,11 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
     ):
         conn = _db()
         try:
+            if scene_tag == "landmark":
+                return RedirectResponse(
+                    url="/pool?err=Pick+a+setting+(urban,+rural,+nature,+indoor_context)+for+scene_tag+and+use+the+landmark+checkbox",
+                    status_code=303,
+                )
             frozen = conn.execute(
                 """
                 SELECT 1 FROM set_members sm
@@ -264,8 +269,32 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
                 (photo_id,),
             ).fetchone()
             if frozen:
+                if scene_tag == "no_clue":
+                    return RedirectResponse(
+                        url="/pool?err=Cannot+mark+a+frozen+set+photo+as+no_clue",
+                        status_code=303,
+                    )
+                conn.execute(
+                    """
+                    UPDATE photos
+                    SET place_label = ?, scene_tag = ?, near_border = ?,
+                        has_text = ?, has_landmark = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        place_label.strip() or None,
+                        scene_tag,
+                        1 if near_border is not None else 0,
+                        1 if has_text is not None else 0,
+                        1 if has_landmark is not None else 0,
+                        photo_id,
+                    ),
+                )
+                conn.commit()
+                return RedirectResponse(url=f"/pool?msg=Updated+tags+for+{photo_id[:8]}", status_code=303)
+            if lat is None or lon is None or not country:
                 return RedirectResponse(
-                    url="/pool?err=Cannot+edit+a+photo+in+a+frozen+set", status_code=303
+                    url="/pool?err=Latitude,+longitude,+and+country+are+required", status_code=303
                 )
             iso2 = normalize_country(country)
             if not iso2:

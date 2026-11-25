@@ -42,7 +42,7 @@
    - Any image previously uploaded online (to avoid training/web contamination)
 3. For each kept photo on `/`:
    - Verify EXIF GPS using the **Open in OSM** link and correct `Lat` / `Lon` if GPS drifted.
-   - Fill `Country` (ISO-2, e.g. `DE`, `FR`, `IT`, `TR`), `Label` (city/area, stored privately), `scene_tag` (`urban`, `rural`, `nature`, `landmark`, `indoor_context`, `no_clue`), and checkboxes (`near_border`, `has_text`, `landmark`).
+   - Fill `Country` (ISO-2, e.g. `DE`, `FR`, `IT`, `TR`), `Label` (city/area, stored privately), `scene_tag` (`urban`, `rural`, `nature`, `indoor_context`, `no_clue`), and checkboxes (`near_border`, `has_text`, `landmark`).
    - Click **Sanitize & Add to Pool** (moves raw original to `data/vault/` and writes metadata-free `1536 px` baseline JPEG to `data/images/<uuid>.jpg`).
 4. Check `/pool` country and scene badges as you go until you reach **`200` photos** across **`> 10` countries** with balanced difficulty.
 5. Run the metadata verification check before freezing:
