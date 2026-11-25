@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS photos (
     near_border INTEGER NOT NULL DEFAULT 0,
     has_text INTEGER NOT NULL DEFAULT 0,
     has_landmark INTEGER NOT NULL DEFAULT 0,
+    landmark_visibility TEXT,
     status TEXT NOT NULL DEFAULT 'pool',
     exclude_reason TEXT,
     taken_date TEXT,
@@ -219,6 +220,8 @@ def init_db(conn: sqlite3.Connection) -> None:
     photo_cols = {r["name"] for r in conn.execute("PRAGMA table_info(photos)").fetchall()}
     if "coord_basis" not in photo_cols:
         conn.execute("ALTER TABLE photos ADD COLUMN coord_basis TEXT NOT NULL DEFAULT 'camera'")
+    if "landmark_visibility" not in photo_cols:
+        conn.execute("ALTER TABLE photos ADD COLUMN landmark_visibility TEXT")
 
     run_cols = {r["name"] for r in conn.execute("PRAGMA table_info(runs)").fetchall()}
     if "scorer_version" not in run_cols:

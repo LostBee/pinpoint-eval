@@ -76,6 +76,12 @@
             <label><input type="checkbox" name="near_border" {% if p.near_border %}checked{% endif %} /> near_border</label><br/>
             <label><input type="checkbox" name="has_text" {% if p.has_text %}checked{% endif %} /> has_text</label><br/>
             <label><input type="checkbox" name="has_landmark" {% if p.has_landmark %}checked{% endif %} /> landmark</label>
+            <select name="landmark_visibility" title="Landmark visibility" style="margin-left:4px;">
+              <option value="" {% if not p.landmark_visibility %}selected{% endif %}>Vis: —</option>
+              <option value="full" {% if p.landmark_visibility == 'full' %}selected{% endif %}>Full</option>
+              <option value="partial" {% if p.landmark_visibility == 'partial' %}selected{% endif %}>Partial</option>
+              <option value="minimal" {% if p.landmark_visibility == 'minimal' %}selected{% endif %}>Minimal</option>
+            </select>
           </td>
           <td><button type="submit" class="secondary">Save Tags</button></td>
         </form>
@@ -105,6 +111,12 @@
             <label><input type="checkbox" name="near_border" {% if p.near_border %}checked{% endif %} /> near_border</label><br/>
             <label><input type="checkbox" name="has_text" {% if p.has_text %}checked{% endif %} /> has_text</label><br/>
             <label><input type="checkbox" name="has_landmark" {% if p.has_landmark %}checked{% endif %} /> landmark</label>
+            <select name="landmark_visibility" title="Landmark visibility" style="margin-left:4px;">
+              <option value="" {% if not p.landmark_visibility %}selected{% endif %}>Vis: —</option>
+              <option value="full" {% if p.landmark_visibility == 'full' %}selected{% endif %}>Full</option>
+              <option value="partial" {% if p.landmark_visibility == 'partial' %}selected{% endif %}>Partial</option>
+              <option value="minimal" {% if p.landmark_visibility == 'minimal' %}selected{% endif %}>Minimal</option>
+            </select>
           </td>
           <td><button type="submit" class="secondary">Save</button></td>
         </form>

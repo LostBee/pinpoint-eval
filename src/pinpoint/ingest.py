@@ -149,6 +149,20 @@ def verify_sanitized_image(image_path: Path) -> None:
         )
 
 
+VALID_LANDMARK_VISIBILITIES = ("full", "partial", "minimal")
+
+
+def normalize_landmark_visibility(has_landmark: bool, raw: str | None) -> str | None:
+    if not has_landmark or not raw or not raw.strip():
+        return None
+    cleaned = raw.strip().lower()
+    if cleaned not in VALID_LANDMARK_VISIBILITIES:
+        raise ValueError(
+            f"Unsupported landmark_visibility: {raw!r} (expected one of {VALID_LANDMARK_VISIBILITIES})"
+        )
+    return cleaned
+
+
 def ingest_photo(
     conn: sqlite3.Connection,
     cfg: PinpointConfig,
@@ -161,6 +175,7 @@ def ingest_photo(
     near_border: bool = False,
     has_text: bool = False,
     has_landmark: bool = False,
+    landmark_visibility: str | None = None,
     coord_basis: str = "camera",
     validate_country_bounds: bool = True,
     status: str = "pool",
@@ -176,6 +191,7 @@ def ingest_photo(
             raise ValueError(bounds_err or "Coordinates outside country bounds")
     if coord_basis not in ("camera", "subject"):
         raise ValueError(f"Unsupported coord_basis: {coord_basis!r} (expected 'camera' or 'subject')")
+    norm_lm_vis = normalize_landmark_visibility(has_landmark, landmark_visibility)
     continent = continent_for_location(iso2, lat, lon) or "OTHER"
 
     meta = read_exif_metadata(inbox_file)
@@ -205,9 +221,9 @@ def ingest_photo(
         INSERT INTO photos (
             id, sha256_sanitized, phash, lat, lon, gps_accuracy_m,
             country_iso2, continent, place_label, scene_tag,
-            near_border, has_text, has_landmark, coord_basis, status, exclude_reason,
+            near_border, has_text, has_landmark, landmark_visibility, coord_basis, status, exclude_reason,
             taken_date, camera_model, vault_filename, added_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             photo_id,
@@ -223,6 +239,7 @@ def ingest_photo(
             1 if near_border else 0,
             1 if has_text else 0,
             1 if has_landmark else 0,
+            norm_lm_vis,
             coord_basis,
             status,
             exclude_reason,

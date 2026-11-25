@@ -586,6 +586,7 @@ def test_frozen_photo_metadata_tags_editable_without_changing_commitment(tmp_pat
                 "place_label": "Sintra wall",
                 "scene_tag": "rural",
                 "has_landmark": "on",
+                "landmark_visibility": "partial",
             },
         )
         assert resp.status_code == 200
@@ -594,6 +595,11 @@ def test_frozen_photo_metadata_tags_editable_without_changing_commitment(tmp_pat
     row = conn2.execute("SELECT * FROM photos WHERE id = ?", (pid,)).fetchone()
     # Ground truth stayed locked, metadata tags updated, commitment hash unchanged
     assert row["lat"] == 49.6116 and row["lon"] == 6.1319 and row["country_iso2"] == "LU"
-    assert row["scene_tag"] == "rural" and row["has_landmark"] == 1 and row["place_label"] == "Sintra wall"
+    assert (
+        row["scene_tag"] == "rural"
+        and row["has_landmark"] == 1
+        and row["landmark_visibility"] == "partial"
+        and row["place_label"] == "Sintra wall"
+    )
     assert compute_commitment_hash(conn2, set_id, salt) == orig_hash
     conn2.close()

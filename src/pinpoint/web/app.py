@@ -33,7 +33,13 @@ from pinpoint.geo import (
     normalize_country,
 )
 from pinpoint.importer import collect_incomplete_official_runs, collect_official_leaderboard
-from pinpoint.ingest import SUPPORTED_EXTENSIONS, ingest_photo, list_inbox_files, read_exif_metadata
+from pinpoint.ingest import (
+    SUPPORTED_EXTENSIONS,
+    ingest_photo,
+    list_inbox_files,
+    normalize_landmark_visibility,
+    read_exif_metadata,
+)
 from pinpoint.runner import (
     SequentialJobWorker,
     enqueue_run_job,
@@ -147,6 +153,7 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
         near_border: str | None = Form(None),
         has_text: str | None = Form(None),
         has_landmark: str | None = Form(None),
+        landmark_visibility: str = Form(""),
     ):
         src = (config.inbox_dir / Path(filename).name).resolve()
         if not src.exists() or src.parent != config.inbox_dir.resolve():
@@ -165,6 +172,7 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
                 near_border=near_border is not None,
                 has_text=has_text is not None,
                 has_landmark=has_landmark is not None,
+                landmark_visibility=landmark_visibility,
                 coord_basis=coord_basis,
             )
             return RedirectResponse(url=f"/?msg=Ingested+{pid[:8]}", status_code=303)
@@ -251,6 +259,7 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
         near_border: str | None = Form(None),
         has_text: str | None = Form(None),
         has_landmark: str | None = Form(None),
+        landmark_visibility: str = Form(""),
     ):
         conn = _db()
         try:
@@ -258,6 +267,14 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
                 return RedirectResponse(
                     url="/pool?err=Pick+a+setting+(urban,+rural,+nature,+indoor_context)+for+scene_tag+and+use+the+landmark+checkbox",
                     status_code=303,
+                )
+            try:
+                norm_lm_vis = normalize_landmark_visibility(
+                    has_landmark is not None, landmark_visibility
+                )
+            except ValueError as exc:
+                return RedirectResponse(
+                    url=f"/pool?err={str(exc).replace(' ', '+')}", status_code=303
                 )
             frozen = conn.execute(
                 """
@@ -278,7 +295,7 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
                     """
                     UPDATE photos
                     SET place_label = ?, scene_tag = ?, near_border = ?,
-                        has_text = ?, has_landmark = ?
+                        has_text = ?, has_landmark = ?, landmark_visibility = ?
                     WHERE id = ?
                     """,
                     (
@@ -287,6 +304,7 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
                         1 if near_border is not None else 0,
                         1 if has_text is not None else 0,
                         1 if has_landmark is not None else 0,
+                        norm_lm_vis,
                         photo_id,
                     ),
                 )
@@ -307,7 +325,7 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
                 UPDATE photos
                 SET lat = ?, lon = ?, country_iso2 = ?, continent = ?,
                     place_label = ?, scene_tag = ?, near_border = ?,
-                    has_text = ?, has_landmark = ?
+                    has_text = ?, has_landmark = ?, landmark_visibility = ?
                 WHERE id = ?
                 """,
                 (
@@ -320,6 +338,7 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
                     1 if near_border is not None else 0,
                     1 if has_text is not None else 0,
                     1 if has_landmark is not None else 0,
+                    norm_lm_vis,
                     photo_id,
                 ),
             )

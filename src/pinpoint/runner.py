@@ -829,7 +829,8 @@ def export_audit_bundle(
     photo_rows = conn.execute(
         """
         SELECT p.id, p.sha256_sanitized, p.lat, p.lon, p.country_iso2, p.continent,
-               p.scene_tag, p.coord_basis, p.gps_accuracy_m, p.near_border, p.has_text, p.has_landmark
+               p.scene_tag, p.coord_basis, p.gps_accuracy_m, p.near_border, p.has_text,
+               p.has_landmark, p.landmark_visibility
         FROM set_members sm
         JOIN photos p ON p.id = sm.photo_id
         WHERE sm.set_id = ?
@@ -858,6 +859,7 @@ def export_audit_bundle(
                 "near_border": bool(r["near_border"]),
                 "has_text": bool(r["has_text"]),
                 "has_landmark": bool(r["has_landmark"]),
+                "landmark_visibility": r["landmark_visibility"],
             }
         )
 
