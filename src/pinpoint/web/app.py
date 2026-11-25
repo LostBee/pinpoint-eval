@@ -8,6 +8,7 @@ import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -260,23 +261,34 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
         has_text: str | None = Form(None),
         has_landmark: str | None = Form(None),
         landmark_visibility: str = Form(""),
+        return_country: str = Form(""),
     ):
+        def _pool_redirect(msg: str = "", err: str = "") -> RedirectResponse:
+            params: dict[str, str] = {}
+            if return_country.strip():
+                params["country"] = return_country.strip().upper()
+            if msg:
+                params["msg"] = msg
+            if err:
+                params["err"] = err
+            qs = f"?{urlencode(params)}" if params else ""
+            return RedirectResponse(url=f"/pool{qs}#photo-{photo_id[:8]}", status_code=303)
+
         conn = _db()
         try:
-            if scene_tag == "landmark":
-                return RedirectResponse(
-                    url="/pool?err=Pick+a+setting+(urban,+rural,+nature,+indoor_context)+for+scene_tag+and+use+the+landmark+checkbox",
-                    status_code=303,
-                )
             effective_has_landmark = (has_landmark is not None) or bool(landmark_visibility.strip())
             try:
                 norm_lm_vis = normalize_landmark_visibility(
                     effective_has_landmark, landmark_visibility
                 )
             except ValueError as exc:
-                return RedirectResponse(
-                    url=f"/pool?err={str(exc).replace(' ', '+')}", status_code=303
-                )
+                return _pool_redirect(err=str(exc))
+
+            legacy_note = (
+                " (remember to pick a non-landmark scene_tag)"
+                if scene_tag == "landmark"
+                else ""
+            )
             frozen = conn.execute(
                 """
                 SELECT 1 FROM set_members sm
@@ -288,10 +300,7 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
             ).fetchone()
             if frozen:
                 if scene_tag == "no_clue":
-                    return RedirectResponse(
-                        url="/pool?err=Cannot+mark+a+frozen+set+photo+as+no_clue",
-                        status_code=303,
-                    )
+                    return _pool_redirect(err="Cannot mark a frozen set photo as no_clue")
                 conn.execute(
                     """
                     UPDATE photos
@@ -310,16 +319,12 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
                     ),
                 )
                 conn.commit()
-                return RedirectResponse(url=f"/pool?msg=Updated+tags+for+{photo_id[:8]}", status_code=303)
+                return _pool_redirect(msg=f"Updated tags for {photo_id[:8]}{legacy_note}")
             if lat is None or lon is None or not country:
-                return RedirectResponse(
-                    url="/pool?err=Latitude,+longitude,+and+country+are+required", status_code=303
-                )
+                return _pool_redirect(err="Latitude, longitude, and country are required")
             iso2 = normalize_country(country)
             if not iso2:
-                return RedirectResponse(
-                    url=f"/pool?err=Unrecognized+country+{country}", status_code=303
-                )
+                return _pool_redirect(err=f"Unrecognized country {country}")
             continent = continent_for_location(iso2, lat, lon) or "OTHER"
             conn.execute(
                 """
@@ -344,7 +349,7 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
                 ),
             )
             conn.commit()
-            return RedirectResponse(url=f"/pool?msg=Updated+{photo_id[:8]}", status_code=303)
+            return _pool_redirect(msg=f"Updated {photo_id[:8]}{legacy_note}")
         finally:
             conn.close()
 

@@ -45,7 +45,7 @@
     <tbody>
       {% for p in photos %}
       {% set fid = "pool-upd-" ~ loop.index %}
-      <tr>
+      <tr id="photo-{{ p.id[:8] }}">
         <td>
           <img src="/media/sanitized/{{ p.id }}" style="height:64px;border-radius:4px;" />
           <div><code>{{ p.id[:8] }}</code></div>
@@ -85,6 +85,7 @@
         <td>
           <form id="{{ fid }}" action="/pool/update" method="post">
             <input type="hidden" name="photo_id" value="{{ p.id }}" />
+            <input type="hidden" name="return_country" value="{{ selected_country }}" />
             <button type="submit" class="secondary">Save Tags</button>
           </form>
         </td>
@@ -122,6 +123,7 @@
         <td>
           <form id="{{ fid }}" action="/pool/update" method="post">
             <input type="hidden" name="photo_id" value="{{ p.id }}" />
+            <input type="hidden" name="return_country" value="{{ selected_country }}" />
             <button type="submit" class="secondary">Save</button>
           </form>
         </td>

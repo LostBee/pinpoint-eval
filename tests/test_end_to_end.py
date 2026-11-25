@@ -625,7 +625,36 @@ def test_frozen_photo_metadata_tags_editable_without_changing_commitment(tmp_pat
 
     conn3 = connect_db(cfg.db_path)
     auto_row = conn3.execute(
-        "SELECT has_landmark, landmark_visibility FROM photos WHERE id != ?", (pid,)
+        "SELECT id, has_landmark, landmark_visibility FROM photos WHERE id != ?", (pid,)
     ).fetchone()
     assert auto_row["has_landmark"] == 1 and auto_row["landmark_visibility"] == "minimal"
+    auto_id = auto_row["id"]
+    # Simulate legacy scene_tag='landmark' on unfrozen photo and update visibility to 'partial'
+    conn3.execute("UPDATE photos SET scene_tag = 'landmark' WHERE id = ?", (auto_id,))
+    conn3.commit()
     conn3.close()
+
+    with TestClient(app) as client:
+        resp3 = client.post(
+            "/pool/update",
+            data={
+                "photo_id": auto_id,
+                "lat": "49.6116",
+                "lon": "6.1319",
+                "country": "LU",
+                "scene_tag": "landmark",
+                "has_landmark": "on",
+                "landmark_visibility": "partial",
+                "return_country": "LU",
+            },
+        )
+        assert resp3.status_code == 200
+        assert "country=LU" in str(resp3.url)
+        assert 'value="partial" selected' in resp3.text
+
+    conn4 = connect_db(cfg.db_path)
+    updated_auto = conn4.execute(
+        "SELECT has_landmark, landmark_visibility FROM photos WHERE id = ?", (auto_id,)
+    ).fetchone()
+    assert updated_auto["has_landmark"] == 1 and updated_auto["landmark_visibility"] == "partial"
+    conn4.close()
