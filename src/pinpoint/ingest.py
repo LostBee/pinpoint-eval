@@ -153,14 +153,14 @@ VALID_LANDMARK_VISIBILITIES = ("full", "partial", "minimal")
 
 
 def normalize_landmark_visibility(has_landmark: bool, raw: str | None) -> str | None:
-    if not has_landmark or not raw or not raw.strip():
+    if not raw or not raw.strip():
         return None
     cleaned = raw.strip().lower()
     if cleaned not in VALID_LANDMARK_VISIBILITIES:
         raise ValueError(
             f"Unsupported landmark_visibility: {raw!r} (expected one of {VALID_LANDMARK_VISIBILITIES})"
         )
-    return cleaned
+    return cleaned if has_landmark else None
 
 
 def ingest_photo(
@@ -191,7 +191,8 @@ def ingest_photo(
             raise ValueError(bounds_err or "Coordinates outside country bounds")
     if coord_basis not in ("camera", "subject"):
         raise ValueError(f"Unsupported coord_basis: {coord_basis!r} (expected 'camera' or 'subject')")
-    norm_lm_vis = normalize_landmark_visibility(has_landmark, landmark_visibility)
+    effective_has_landmark = has_landmark or bool(landmark_visibility and landmark_visibility.strip())
+    norm_lm_vis = normalize_landmark_visibility(effective_has_landmark, landmark_visibility)
     continent = continent_for_location(iso2, lat, lon) or "OTHER"
 
     meta = read_exif_metadata(inbox_file)
@@ -238,7 +239,7 @@ def ingest_photo(
             scene_tag,
             1 if near_border else 0,
             1 if has_text else 0,
-            1 if has_landmark else 0,
+            1 if effective_has_landmark else 0,
             norm_lm_vis,
             coord_basis,
             status,

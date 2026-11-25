@@ -44,6 +44,7 @@
     </thead>
     <tbody>
       {% for p in photos %}
+      {% set fid = "pool-upd-" ~ loop.index %}
       <tr>
         <td>
           <img src="/media/sanitized/{{ p.id }}" style="height:64px;border-radius:4px;" />
@@ -51,79 +52,97 @@
           <div class="muted">{{ p.camera_model or "" }}</div>
         </td>
         {% if p.is_frozen %}
-        <form action="/pool/update" method="post">
-          <input type="hidden" name="photo_id" value="{{ p.id }}" />
-          <td>
-            {{ "%.5f"|format(p.lat) }}, {{ "%.5f"|format(p.lon) }}
-            <div>{{ map_links(p.lat, p.lon) }}</div>
-            <span class="badge badge-muted">Locked GT</span>
-          </td>
-          <td>
-            <div class="row">
-              <strong>{{ p.country_iso2 }}</strong> ({{ p.continent }})
-              <select name="scene_tag">
-                {% if p.scene_tag == 'landmark' %}
-                <option value="landmark" selected>landmark (legacy — pick setting)</option>
-                {% endif %}
-                {% for st in ['urban', 'rural', 'nature', 'indoor_context'] %}
-                <option value="{{ st }}" {% if p.scene_tag == st %}selected{% endif %}>{{ st }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <input type="text" name="place_label" value="{{ p.place_label or '' }}" placeholder="Label" style="width:170px;" />
-          </td>
-          <td>
-            <label><input type="checkbox" name="near_border" {% if p.near_border %}checked{% endif %} /> near_border</label><br/>
-            <label><input type="checkbox" name="has_text" {% if p.has_text %}checked{% endif %} /> has_text</label><br/>
-            <label><input type="checkbox" name="has_landmark" {% if p.has_landmark %}checked{% endif %} /> landmark</label>
-            <select name="landmark_visibility" title="Landmark visibility" style="margin-left:4px;">
-              <option value="" {% if not p.landmark_visibility %}selected{% endif %}>Vis: —</option>
-              <option value="full" {% if p.landmark_visibility == 'full' %}selected{% endif %}>Full</option>
-              <option value="partial" {% if p.landmark_visibility == 'partial' %}selected{% endif %}>Partial</option>
-              <option value="minimal" {% if p.landmark_visibility == 'minimal' %}selected{% endif %}>Minimal</option>
+        <td>
+          {{ "%.5f"|format(p.lat) }}, {{ "%.5f"|format(p.lon) }}
+          <div>{{ map_links(p.lat, p.lon) }}</div>
+          <span class="badge badge-muted">Locked GT</span>
+        </td>
+        <td>
+          <div class="row">
+            <strong>{{ p.country_iso2 }}</strong> ({{ p.continent }})
+            <select name="scene_tag" form="{{ fid }}">
+              {% if p.scene_tag == 'landmark' %}
+              <option value="landmark" selected>landmark (legacy — pick setting)</option>
+              {% endif %}
+              {% for st in ['urban', 'rural', 'nature', 'indoor_context'] %}
+              <option value="{{ st }}" {% if p.scene_tag == st %}selected{% endif %}>{{ st }}</option>
+              {% endfor %}
             </select>
-          </td>
-          <td><button type="submit" class="secondary">Save Tags</button></td>
-        </form>
+          </div>
+          <input type="text" name="place_label" value="{{ p.place_label or '' }}" placeholder="Label" style="width:170px;" form="{{ fid }}" />
+        </td>
+        <td>
+          <label><input type="checkbox" name="near_border" {% if p.near_border %}checked{% endif %} form="{{ fid }}" /> near_border</label><br/>
+          <label><input type="checkbox" name="has_text" {% if p.has_text %}checked{% endif %} form="{{ fid }}" /> has_text</label><br/>
+          <label><input type="checkbox" name="has_landmark" class="lm-cb" {% if p.has_landmark %}checked{% endif %} form="{{ fid }}" /> landmark</label>
+          <select name="landmark_visibility" class="lm-vis" title="Landmark visibility" style="margin-left:4px;" form="{{ fid }}">
+            <option value="" {% if not p.landmark_visibility %}selected{% endif %}>Vis: —</option>
+            <option value="full" {% if p.landmark_visibility == 'full' %}selected{% endif %}>Full</option>
+            <option value="partial" {% if p.landmark_visibility == 'partial' %}selected{% endif %}>Partial</option>
+            <option value="minimal" {% if p.landmark_visibility == 'minimal' %}selected{% endif %}>Minimal</option>
+          </select>
+        </td>
+        <td>
+          <form id="{{ fid }}" action="/pool/update" method="post">
+            <input type="hidden" name="photo_id" value="{{ p.id }}" />
+            <button type="submit" class="secondary">Save Tags</button>
+          </form>
+        </td>
         {% else %}
-        <form action="/pool/update" method="post">
-          <input type="hidden" name="photo_id" value="{{ p.id }}" />
-          <td>
-            <input type="number" step="any" name="lat" value="{{ p.lat }}" style="width:95px;" required />
-            <input type="number" step="any" name="lon" value="{{ p.lon }}" style="width:95px;" required />
-            <div>{{ map_links(p.lat, p.lon) }}</div>
-          </td>
-          <td>
-            <div class="row">
-              <input type="text" name="country" list="eu-countries" value="{{ p.country_iso2 }}" style="width:65px;" required />
-              <select name="scene_tag">
-                {% if p.scene_tag == 'landmark' %}
-                <option value="landmark" selected>landmark (legacy — pick setting)</option>
-                {% endif %}
-                {% for st in ['urban', 'rural', 'nature', 'indoor_context', 'no_clue'] %}
-                <option value="{{ st }}" {% if p.scene_tag == st %}selected{% endif %}>{{ st }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <input type="text" name="place_label" value="{{ p.place_label or '' }}" placeholder="Label" style="width:170px;" />
-          </td>
-          <td>
-            <label><input type="checkbox" name="near_border" {% if p.near_border %}checked{% endif %} /> near_border</label><br/>
-            <label><input type="checkbox" name="has_text" {% if p.has_text %}checked{% endif %} /> has_text</label><br/>
-            <label><input type="checkbox" name="has_landmark" {% if p.has_landmark %}checked{% endif %} /> landmark</label>
-            <select name="landmark_visibility" title="Landmark visibility" style="margin-left:4px;">
-              <option value="" {% if not p.landmark_visibility %}selected{% endif %}>Vis: —</option>
-              <option value="full" {% if p.landmark_visibility == 'full' %}selected{% endif %}>Full</option>
-              <option value="partial" {% if p.landmark_visibility == 'partial' %}selected{% endif %}>Partial</option>
-              <option value="minimal" {% if p.landmark_visibility == 'minimal' %}selected{% endif %}>Minimal</option>
+        <td>
+          <input type="number" step="any" name="lat" value="{{ p.lat }}" style="width:95px;" required form="{{ fid }}" />
+          <input type="number" step="any" name="lon" value="{{ p.lon }}" style="width:95px;" required form="{{ fid }}" />
+          <div>{{ map_links(p.lat, p.lon) }}</div>
+        </td>
+        <td>
+          <div class="row">
+            <input type="text" name="country" list="eu-countries" value="{{ p.country_iso2 }}" style="width:65px;" required form="{{ fid }}" />
+            <select name="scene_tag" form="{{ fid }}">
+              {% if p.scene_tag == 'landmark' %}
+              <option value="landmark" selected>landmark (legacy — pick setting)</option>
+              {% endif %}
+              {% for st in ['urban', 'rural', 'nature', 'indoor_context', 'no_clue'] %}
+              <option value="{{ st }}" {% if p.scene_tag == st %}selected{% endif %}>{{ st }}</option>
+              {% endfor %}
             </select>
-          </td>
-          <td><button type="submit" class="secondary">Save</button></td>
-        </form>
+          </div>
+          <input type="text" name="place_label" value="{{ p.place_label or '' }}" placeholder="Label" style="width:170px;" form="{{ fid }}" />
+        </td>
+        <td>
+          <label><input type="checkbox" name="near_border" {% if p.near_border %}checked{% endif %} form="{{ fid }}" /> near_border</label><br/>
+          <label><input type="checkbox" name="has_text" {% if p.has_text %}checked{% endif %} form="{{ fid }}" /> has_text</label><br/>
+          <label><input type="checkbox" name="has_landmark" class="lm-cb" {% if p.has_landmark %}checked{% endif %} form="{{ fid }}" /> landmark</label>
+          <select name="landmark_visibility" class="lm-vis" title="Landmark visibility" style="margin-left:4px;" form="{{ fid }}">
+            <option value="" {% if not p.landmark_visibility %}selected{% endif %}>Vis: —</option>
+            <option value="full" {% if p.landmark_visibility == 'full' %}selected{% endif %}>Full</option>
+            <option value="partial" {% if p.landmark_visibility == 'partial' %}selected{% endif %}>Partial</option>
+            <option value="minimal" {% if p.landmark_visibility == 'minimal' %}selected{% endif %}>Minimal</option>
+          </select>
+        </td>
+        <td>
+          <form id="{{ fid }}" action="/pool/update" method="post">
+            <input type="hidden" name="photo_id" value="{{ p.id }}" />
+            <button type="submit" class="secondary">Save</button>
+          </form>
+        </td>
         {% endif %}
       </tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
+<script>
+document.querySelectorAll(".lm-vis").forEach((sel) => {
+  sel.addEventListener("change", () => {
+    const cb = sel.closest("td")?.querySelector(".lm-cb");
+    if (cb && sel.value) cb.checked = true;
+  });
+});
+document.querySelectorAll(".lm-cb").forEach((cb) => {
+  cb.addEventListener("change", () => {
+    const sel = cb.closest("td")?.querySelector(".lm-vis");
+    if (sel && !cb.checked) sel.value = "";
+  });
+});
+</script>
 {% endblock %}

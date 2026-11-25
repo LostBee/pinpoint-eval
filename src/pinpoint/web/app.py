@@ -268,9 +268,10 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
                     url="/pool?err=Pick+a+setting+(urban,+rural,+nature,+indoor_context)+for+scene_tag+and+use+the+landmark+checkbox",
                     status_code=303,
                 )
+            effective_has_landmark = (has_landmark is not None) or bool(landmark_visibility.strip())
             try:
                 norm_lm_vis = normalize_landmark_visibility(
-                    has_landmark is not None, landmark_visibility
+                    effective_has_landmark, landmark_visibility
                 )
             except ValueError as exc:
                 return RedirectResponse(
@@ -303,7 +304,7 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
                         scene_tag,
                         1 if near_border is not None else 0,
                         1 if has_text is not None else 0,
-                        1 if has_landmark is not None else 0,
+                        1 if effective_has_landmark else 0,
                         norm_lm_vis,
                         photo_id,
                     ),
@@ -337,7 +338,7 @@ def create_app(cfg: PinpointConfig | None = None, start_worker: bool = True) -> 
                     scene_tag,
                     1 if near_border is not None else 0,
                     1 if has_text is not None else 0,
-                    1 if has_landmark is not None else 0,
+                    1 if effective_has_landmark else 0,
                     norm_lm_vis,
                     photo_id,
                 ),

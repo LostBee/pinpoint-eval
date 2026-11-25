@@ -59,9 +59,9 @@
         </select>
         <label><input type="checkbox" name="near_border" /> near_border</label>
         <label><input type="checkbox" name="has_text" /> has_text</label>
-        <label><input type="checkbox" name="has_landmark" /> landmark</label>
+        <label><input type="checkbox" name="has_landmark" class="lm-cb" /> landmark</label>
         <label>Visibility
-          <select name="landmark_visibility">
+          <select name="landmark_visibility" class="lm-vis">
             <option value="">—</option>
             <option value="full">Full</option>
             <option value="partial">Partial</option>
@@ -80,5 +80,19 @@
   </div>
   {% endfor %}
 </div>
+<script>
+document.querySelectorAll(".lm-vis").forEach((sel) => {
+  sel.addEventListener("change", () => {
+    const cb = sel.closest("form")?.querySelector(".lm-cb");
+    if (cb && sel.value) cb.checked = true;
+  });
+});
+document.querySelectorAll(".lm-cb").forEach((cb) => {
+  cb.addEventListener("change", () => {
+    const sel = cb.closest("form")?.querySelector(".lm-vis");
+    if (sel && !cb.checked) sel.value = "";
+  });
+});
+</script>
 {% endif %}
 {% endblock %}

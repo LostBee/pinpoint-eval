@@ -603,3 +603,29 @@ def test_frozen_photo_metadata_tags_editable_without_changing_commitment(tmp_pat
     )
     assert compute_commitment_hash(conn2, set_id, salt) == orig_hash
     conn2.close()
+
+    # Also verify selecting landmark_visibility without checking has_landmark auto-sets has_landmark=1
+    p_auto = cfg.inbox_dir / "PXL_auto_lm.jpg"
+    Image.new("RGB", (320, 240), color=(90, 60, 30)).save(p_auto, format="JPEG")
+    with TestClient(app) as client:
+        resp2 = client.post(
+            "/inbox/ingest",
+            data={
+                "filename": "PXL_auto_lm.jpg",
+                "lat": "49.6116",
+                "lon": "6.1319",
+                "country": "LU",
+                "scene_tag": "urban",
+                "landmark_visibility": "minimal",
+            },
+        )
+        assert resp2.status_code == 200
+        pool_html2 = client.get("/pool").text
+        assert 'value="minimal" selected' in pool_html2
+
+    conn3 = connect_db(cfg.db_path)
+    auto_row = conn3.execute(
+        "SELECT has_landmark, landmark_visibility FROM photos WHERE id != ?", (pid,)
+    ).fetchone()
+    assert auto_row["has_landmark"] == 1 and auto_row["landmark_visibility"] == "minimal"
+    conn3.close()
